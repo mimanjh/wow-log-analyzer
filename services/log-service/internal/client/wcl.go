@@ -26,7 +26,10 @@ type WCLClient interface {
 	GetReportMetadata(reportID string) (*types.NormalizedReport, error)
 	GetFights(reportID string) ([]types.NormalizedFight, error)
 	GetCharacters(reportID string, fightID int) ([]types.CharacterOption, error)
-	GetComparisonData(reportID string, fightID int, characterID int) (*types.ComparisonDataResponse, error)
+	GetComparisonData(reportID string, fight types.FightSelection, characterID int) (*types.ComparisonDataResponse, error)
+	GetPlayerFightData(reportID string, fight types.FightSelection, characterID int) (*types.PlayerFightData, error)
+	GetRankingCandidates(fight types.FightSelection, characterClass, characterSpec string, limit int) ([]types.RankingCandidate, error)
+	GetCohortMemberData(candidate types.RankingCandidate) (*types.PlayerFightData, error)
 }
 
 // WCLHTTPClient implements WCLClient using HTTP requests
@@ -40,10 +43,12 @@ type WCLHTTPClient struct {
 
 // NewWCLClient creates a new Warcraft Logs client
 func NewWCLClient(cfg config.WCLConfig) WCLClient {
+	const requestTimeout = 120 * time.Second
+
 	return &WCLHTTPClient{
 		config: cfg,
 		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout: requestTimeout,
 		},
 	}
 }
@@ -124,22 +129,6 @@ func (c *WCLHTTPClient) GetCharacters(reportID string, fightID int) ([]types.Cha
 		return nil, err
 	}
 
-	fights, err := c.GetFights(reportID)
-	if err != nil {
-		return nil, err
-	}
-
-	validFight := false
-	for _, fight := range fights {
-		if fight.ID == fightID {
-			validFight = true
-			break
-		}
-	}
-	if !validFight {
-		return nil, fmt.Errorf("fight %d not found in report", fightID)
-	}
-
 	characters := make([]types.CharacterOption, 0, len(actors))
 	for _, actor := range actors {
 		characters = append(characters, types.CharacterOption{
@@ -158,22 +147,12 @@ func (c *WCLHTTPClient) GetCharacters(reportID string, fightID int) ([]types.Cha
 	return characters, nil
 }
 
-func (c *WCLHTTPClient) GetComparisonData(reportID string, fightID int, characterID int) (*types.ComparisonDataResponse, error) {
-	fights, err := c.GetFights(reportID)
-	if err != nil {
-		return nil, err
-	}
+func (c *WCLHTTPClient) GetComparisonData(reportID string, fight types.FightSelection, characterID int) (*types.ComparisonDataResponse, error) {
+	selectedFight := normalizedFightFromSelection(fight)
 
-	var selectedFight *types.NormalizedFight
-	for _, fight := range fights {
-		if fight.ID == fightID {
-			fightCopy := fight
-			selectedFight = &fightCopy
-			break
-		}
-	}
-	if selectedFight == nil {
-		return nil, fmt.Errorf("fight %d not found in report", fightID)
+	playerData, err := c.GetPlayerFightData(reportID, fight, characterID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch player fight data: %w", err)
 	}
 
 	actors, err := c.getPlayerActors(reportID)
@@ -193,26 +172,22 @@ func (c *WCLHTTPClient) GetComparisonData(reportID string, fightID int, characte
 		return nil, fmt.Errorf("character %d not found in report", characterID)
 	}
 
-	playerData, err := c.fetchPlayerFightData(reportID, *selectedFight, *selectedActor)
+	candidates, err := c.GetRankingCandidates(fight, selectedActor.Type, selectedActor.SubType, 10)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch player fight data: %w", err)
+		return nil, fmt.Errorf("failed to fetch ranking candidates: %w", err)
 	}
 
-	cohortActors := selectCohortActors(actors, *selectedActor)
-	cohortData := make([]types.PlayerFightData, 0, len(cohortActors))
-	for _, actor := range cohortActors {
-		cohortEntry, err := c.fetchPlayerFightData(reportID, *selectedFight, actor)
+	cohortData := make([]types.PlayerFightData, 0, len(candidates))
+	for _, candidate := range candidates {
+		cohortEntry, err := c.GetCohortMemberData(candidate)
 		if err != nil {
 			continue
 		}
-		cohortData = append(cohortData, cohortEntry)
-		if len(cohortData) == 5 {
-			break
-		}
+		cohortData = append(cohortData, *cohortEntry)
 	}
 
 	if len(cohortData) == 0 {
-		return nil, fmt.Errorf("no cohort candidates found for fight %d", fightID)
+		return nil, fmt.Errorf("no cohort candidates found for fight %d", fight.ID)
 	}
 
 	return &types.ComparisonDataResponse{
@@ -224,9 +199,97 @@ func (c *WCLHTTPClient) GetComparisonData(reportID string, fightID int, characte
 			KillTime:    int(selectedFight.EndTime.Sub(selectedFight.StartTime).Seconds()),
 			EncounterID: selectedFight.EncounterID,
 		},
-		PlayerData: playerData,
+		PlayerData: *playerData,
 		CohortData: cohortData,
 	}, nil
+}
+
+func (c *WCLHTTPClient) GetPlayerFightData(reportID string, fight types.FightSelection, characterID int) (*types.PlayerFightData, error) {
+	actors, err := c.getPlayerActors(reportID)
+	if err != nil {
+		return nil, err
+	}
+
+	var selectedActor *WCLActor
+	for _, actor := range actors {
+		if actor.ID == characterID {
+			actorCopy := actor
+			selectedActor = &actorCopy
+			break
+		}
+	}
+	if selectedActor == nil {
+		return nil, fmt.Errorf("character %d not found in report", characterID)
+	}
+
+	selectedFight := normalizedFightFromSelection(fight)
+	playerData, err := c.fetchPlayerFightData(reportID, selectedFight, *selectedActor)
+	if err != nil {
+		return nil, err
+	}
+
+	return &playerData, nil
+}
+
+func (c *WCLHTTPClient) GetRankingCandidates(fight types.FightSelection, characterClass, characterSpec string, limit int) ([]types.RankingCandidate, error) {
+	selectedFight := normalizedFightFromSelection(fight)
+	if limit <= 0 {
+		limit = 10
+	}
+
+	rankings, err := c.getEncounterRankings(selectedFight.EncounterID, selectedFight.Difficulty, characterClass, characterSpec)
+	if err != nil {
+		return nil, err
+	}
+
+	capacity := limit
+	if len(rankings) < capacity {
+		capacity = len(rankings)
+	}
+	candidates := make([]types.RankingCandidate, 0, capacity)
+	for _, ranking := range rankings {
+		candidates = append(candidates, types.RankingCandidate{
+			Name:         ranking.Name,
+			Class:        normalizeClass(ranking.Class),
+			Spec:         normalizeSpec(ranking.Spec),
+			Server:       ranking.Server.Name,
+			ServerRegion: ranking.Server.Region,
+			ReportID:     ranking.Report.Code,
+			FightID:      ranking.Report.FightID,
+			RankValue:    ranking.Amount,
+			DurationMS:   ranking.Duration,
+		})
+		if len(candidates) == limit {
+			break
+		}
+	}
+
+	return candidates, nil
+}
+
+func (c *WCLHTTPClient) GetCohortMemberData(candidate types.RankingCandidate) (*types.PlayerFightData, error) {
+	ranking := WCLRankingEntry{
+		Name:     candidate.Name,
+		Class:    candidate.Class,
+		Spec:     candidate.Spec,
+		Amount:   candidate.RankValue,
+		Duration: candidate.DurationMS,
+		Report: WCLRankingReport{
+			Code:    candidate.ReportID,
+			FightID: candidate.FightID,
+		},
+		Server: WCLRankingServer{
+			Name:   candidate.Server,
+			Region: candidate.ServerRegion,
+		},
+	}
+
+	data, err := c.fetchRankedPlayerFightData(ranking)
+	if err != nil {
+		return nil, err
+	}
+
+	return &data, nil
 }
 
 // makeGraphQLRequest performs a GraphQL request to the WCL API
@@ -349,17 +412,178 @@ func (c *WCLHTTPClient) normalizeFights(wclFights []WCLFight) []types.Normalized
 // normalizeDifficulty converts WCL difficulty numbers to readable strings
 func (c *WCLHTTPClient) normalizeDifficulty(difficulty int) string {
 	switch difficulty {
-	case 1:
+	case 17, 1:
 		return "LFR"
-	case 2:
+	case 2, 3:
 		return "Normal"
-	case 3:
-		return "Heroic"
 	case 4:
+		return "Heroic"
+	case 5:
 		return "Mythic"
 	default:
 		return "Unknown"
 	}
+}
+
+func (c *WCLHTTPClient) fetchTopRankedCohortData(selectedFight types.NormalizedFight, selectedActor WCLActor) ([]types.PlayerFightData, error) {
+	rankings, err := c.getEncounterRankings(selectedFight.EncounterID, selectedFight.Difficulty, selectedActor.Type, selectedActor.SubType)
+	if err != nil {
+		return nil, err
+	}
+
+	type cohortResult struct {
+		index int
+		data  types.PlayerFightData
+		err   error
+	}
+
+	results := make(chan cohortResult, len(rankings))
+	var wg sync.WaitGroup
+
+	for index, ranking := range rankings {
+		wg.Add(1)
+		go func(index int, ranking WCLRankingEntry) {
+			defer wg.Done()
+
+			data, err := c.fetchRankedPlayerFightData(ranking)
+			results <- cohortResult{
+				index: index,
+				data:  data,
+				err:   err,
+			}
+		}(index, ranking)
+	}
+
+	wg.Wait()
+	close(results)
+
+	ordered := make([]types.PlayerFightData, 0, 10)
+	byIndex := make(map[int]types.PlayerFightData, len(rankings))
+	for result := range results {
+		if result.err != nil {
+			continue
+		}
+		byIndex[result.index] = result.data
+	}
+
+	for index := range rankings {
+		data, ok := byIndex[index]
+		if !ok {
+			continue
+		}
+		ordered = append(ordered, data)
+		if len(ordered) == 10 {
+			break
+		}
+	}
+
+	return ordered, nil
+}
+
+func (c *WCLHTTPClient) getEncounterRankings(encounterID int, difficultyName, className, specName string) ([]WCLRankingEntry, error) {
+	page := 1
+	results := make([]WCLRankingEntry, 0, 10)
+
+	for len(results) < 10 {
+		rankingPage, err := c.fetchEncounterRankingsPage(encounterID, difficultyName, page)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, ranking := range rankingPage.Rankings {
+			if normalizeClass(ranking.Class) != normalizeClass(className) {
+				continue
+			}
+			if normalizeSpec(ranking.Spec) != normalizeSpec(specName) {
+				continue
+			}
+			results = append(results, ranking)
+			if len(results) == 10 {
+				break
+			}
+		}
+
+		if !rankingPage.HasMorePages || len(rankingPage.Rankings) == 0 {
+			break
+		}
+		page++
+	}
+
+	return results, nil
+}
+
+func (c *WCLHTTPClient) fetchEncounterRankingsPage(encounterID int, difficultyName string, page int) (*WCLCharacterRankingsResponse, error) {
+	difficultyArg := ""
+	if difficultyID := rankingDifficultyID(difficultyName); difficultyID != 0 {
+		difficultyArg = fmt.Sprintf(", difficulty: %d", difficultyID)
+	}
+
+	query := fmt.Sprintf(`
+		query {
+			worldData {
+				encounter(id: %d) {
+					characterRankings(page: %d%s, includeCombatantInfo: true, metric: default)
+				}
+			}
+		}`, encounterID, page, difficultyArg)
+
+	var response struct {
+		Data struct {
+			WorldData struct {
+				Encounter struct {
+					CharacterRankings WCLCharacterRankingsResponse `json:"characterRankings"`
+				} `json:"encounter"`
+			} `json:"worldData"`
+		} `json:"data"`
+	}
+
+	var err error
+	for attempt := 1; attempt <= 3; attempt++ {
+		err = c.makeGraphQLRequest(query, &response)
+		if err == nil {
+			break
+		}
+		if !isRetryableWCLFailure(err) || attempt == 3 {
+			return nil, fmt.Errorf("failed to fetch encounter rankings: %w", err)
+		}
+		time.Sleep(time.Duration(attempt) * 750 * time.Millisecond)
+	}
+	if response.Data.WorldData.Encounter.CharacterRankings.Error != "" {
+		return nil, fmt.Errorf("warcraft logs rankings query failed: %s", response.Data.WorldData.Encounter.CharacterRankings.Error)
+	}
+
+	return &response.Data.WorldData.Encounter.CharacterRankings, nil
+}
+
+func (c *WCLHTTPClient) fetchRankedPlayerFightData(ranking WCLRankingEntry) (types.PlayerFightData, error) {
+	fights, err := c.GetFights(ranking.Report.Code)
+	if err != nil {
+		return types.PlayerFightData{}, err
+	}
+
+	var fight *types.NormalizedFight
+	for _, entry := range fights {
+		if entry.ID == ranking.Report.FightID {
+			entryCopy := entry
+			fight = &entryCopy
+			break
+		}
+	}
+	if fight == nil {
+		return types.PlayerFightData{}, fmt.Errorf("fight %d not found in report %s", ranking.Report.FightID, ranking.Report.Code)
+	}
+
+	actors, err := c.getPlayerActors(ranking.Report.Code)
+	if err != nil {
+		return types.PlayerFightData{}, err
+	}
+
+	actor, found := matchRankingToActor(actors, ranking)
+	if !found {
+		return types.PlayerFightData{}, fmt.Errorf("actor match not found for %s in report %s", ranking.Name, ranking.Report.Code)
+	}
+
+	return c.fetchPlayerFightData(ranking.Report.Code, *fight, actor)
 }
 
 func (c *WCLHTTPClient) getPlayerActors(reportID string) ([]WCLActor, error) {
@@ -545,50 +769,31 @@ func (c *WCLHTTPClient) fetchBuffEvents(reportID string, fightID, actorID int, s
 	return collected, nil
 }
 
-func selectCohortActors(actors []WCLActor, selected WCLActor) []WCLActor {
-	candidates := make([]WCLActor, 0, len(actors))
+func matchRankingToActor(actors []WCLActor, ranking WCLRankingEntry) (WCLActor, bool) {
+	rankingName := strings.TrimSpace(ranking.Name)
+	rankingServer := strings.TrimSpace(ranking.Server.Name)
+	rankingSpec := normalizeSpec(ranking.Spec)
+
 	for _, actor := range actors {
-		if actor.ID == selected.ID {
+		if strings.TrimSpace(actor.Name) != rankingName {
 			continue
 		}
-		if selected.SubType != "" && actor.SubType == selected.SubType {
-			candidates = append(candidates, actor)
-		}
-	}
-	if len(candidates) >= 2 {
-		return candidates
-	}
-
-	for _, actor := range actors {
-		if actor.ID == selected.ID {
+		if rankingServer != "" && strings.TrimSpace(actor.Server) != "" && strings.TrimSpace(actor.Server) != rankingServer {
 			continue
 		}
-		if actor.Type == selected.Type && !containsActor(candidates, actor.ID) {
-			candidates = append(candidates, actor)
-		}
-	}
-
-	if len(candidates) >= 2 {
-		return candidates
-	}
-
-	for _, actor := range actors {
-		if actor.ID == selected.ID || containsActor(candidates, actor.ID) {
+		if rankingSpec != "" && normalizeSpec(actor.SubType) != rankingSpec {
 			continue
 		}
-		candidates = append(candidates, actor)
+		return actor, true
 	}
 
-	return candidates
-}
-
-func containsActor(actors []WCLActor, actorID int) bool {
 	for _, actor := range actors {
-		if actor.ID == actorID {
-			return true
+		if strings.TrimSpace(actor.Name) == rankingName {
+			return actor, true
 		}
 	}
-	return false
+
+	return WCLActor{}, false
 }
 
 func normalizeCastEvents(raw []map[string]interface{}) []types.CastEvent {
@@ -774,4 +979,39 @@ func inferRole(spec string) string {
 	default:
 		return "DPS"
 	}
+}
+
+func rankingDifficultyID(name string) int {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "lfr":
+		return 17
+	case "normal":
+		return 3
+	case "heroic":
+		return 4
+	case "mythic":
+		return 5
+	default:
+		return 0
+	}
+}
+
+func normalizedFightFromSelection(selection types.FightSelection) types.NormalizedFight {
+	return types.NormalizedFight{
+		ID:          selection.ID,
+		Name:        selection.Name,
+		StartTime:   selection.StartTime,
+		EndTime:     selection.EndTime,
+		EncounterID: selection.EncounterID,
+		Difficulty:  selection.Difficulty,
+		BossPercent: selection.BossPercent,
+	}
+}
+
+func isRetryableWCLFailure(err error) bool {
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "status 504") ||
+		strings.Contains(message, "status 503") ||
+		strings.Contains(message, "status 502") ||
+		strings.Contains(message, "timeout")
 }

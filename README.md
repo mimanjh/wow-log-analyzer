@@ -79,6 +79,12 @@ npm run dev
 ### Backend
 
 ```bash
+sed -i 's/\r$//' .env
+
+set -a
+source .env
+set +a
+
 cd services/api-gateway
 go run ./cmd/server
 ```

@@ -136,7 +136,7 @@ func TestWCLHTTPClient_GetFights(t *testing.T) {
 		StartTime:   time.UnixMilli(1700000000000),
 		EndTime:     time.UnixMilli(1700003600000),
 		EncounterID: 1234,
-		Difficulty:  "Heroic",
+		Difficulty:  "Normal",
 		Kill:        true,
 		BossPercent: 0,
 	}
@@ -163,7 +163,7 @@ func TestWCLHTTPClient_GetFights(t *testing.T) {
 		t.Errorf("Expected Kill %t, got %t", expected.Kill, fight.Kill)
 	}
 	if fight.BossPercent != expected.BossPercent {
-		t.Errorf("Expected BossPercent %d, got %d", expected.BossPercent, fight.BossPercent)
+		t.Errorf("Expected BossPercent %f, got %f", expected.BossPercent, fight.BossPercent)
 	}
 }
 
@@ -176,9 +176,11 @@ func TestWCLHTTPClient_normalizeDifficulty(t *testing.T) {
 	}{
 		{1, "LFR"},
 		{2, "Normal"},
-		{3, "Heroic"},
-		{4, "Mythic"},
-		{5, "Unknown"},
+		{3, "Normal"},
+		{4, "Heroic"},
+		{5, "Mythic"},
+		{17, "LFR"},
+		{99, "Unknown"},
 	}
 
 	for _, test := range tests {

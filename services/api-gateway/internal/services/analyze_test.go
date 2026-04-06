@@ -2,6 +2,7 @@ package services
 
 import (
 	"testing"
+	"time"
 )
 
 type stubLogClient struct {
@@ -28,10 +29,11 @@ func TestAnalyzeService_ValidateAndParseUrl(t *testing.T) {
 	}{
 		{
 			name: "valid URL",
-			url:  "https://www.warcraftlogs.com/reports/abc123",
+			url:  "https://www.warcraftlogs.com/reports/abc123?fight=4",
 			want: UrlValidationResult{
-				IsValid:  true,
-				ReportID: "abc123",
+				IsValid:          true,
+				ReportID:         "abc123",
+				PreferredFightID: 4,
 			},
 		},
 		{
@@ -144,6 +146,9 @@ func TestAnalyzeService_ValidateAndParseUrl(t *testing.T) {
 			if got.Error != tt.want.Error {
 				t.Errorf("ValidateAndParseUrl() Error = %v, want %v", got.Error, tt.want.Error)
 			}
+			if got.PreferredFightID != tt.want.PreferredFightID {
+				t.Errorf("ValidateAndParseUrl() PreferredFightID = %v, want %v", got.PreferredFightID, tt.want.PreferredFightID)
+			}
 		})
 	}
 }
@@ -152,8 +157,8 @@ func TestAnalyzeService_ProcessIntake(t *testing.T) {
 	service := &AnalyzeService{
 		logClient: &stubLogClient{
 			fights: []FightSummary{
-				{ID: 1, Name: "Boss One", Difficulty: "Heroic", KillTime: 300, EncounterID: 101},
-				{ID: 2, Name: "Boss Two", Difficulty: "Mythic", KillTime: 420, EncounterID: 102},
+				{ID: 1, Name: "Boss One", Difficulty: "Heroic", KillTime: 300, EncounterID: 101, StartTime: time.Unix(0, 0), EndTime: time.Unix(300, 0)},
+				{ID: 2, Name: "Boss Two", Difficulty: "Mythic", KillTime: 420, EncounterID: 102, StartTime: time.Unix(0, 0), EndTime: time.Unix(420, 0)},
 			},
 			characters: []CharacterSummary{
 				{ID: 1, Name: "Tester", Class: "Mage", Spec: "Fire", Role: "DPS"},
@@ -163,7 +168,7 @@ func TestAnalyzeService_ProcessIntake(t *testing.T) {
 
 	t.Run("valid request", func(t *testing.T) {
 		req := AnalyzeIntakeRequest{
-			Url: "https://www.warcraftlogs.com/reports/abc123",
+			Url: "https://www.warcraftlogs.com/reports/abc123?fight=2",
 		}
 
 		resp, err := service.ProcessIntake(req)
@@ -182,6 +187,14 @@ func TestAnalyzeService_ProcessIntake(t *testing.T) {
 
 		if len(resp.Characters) != 1 {
 			t.Errorf("ProcessIntake() expected 1 character, got %d", len(resp.Characters))
+		}
+
+		if resp.PreferredFightID != 2 {
+			t.Errorf("ProcessIntake() PreferredFightID = %v, want %v", resp.PreferredFightID, 2)
+		}
+
+		if len(resp.Fights) > 0 && resp.Fights[0].ID != 2 {
+			t.Errorf("ProcessIntake() expected preferred fight to be first, got %d", resp.Fights[0].ID)
 		}
 	})
 

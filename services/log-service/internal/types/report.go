@@ -26,7 +26,7 @@ type NormalizedFight struct {
 	EncounterID int       `json:"encounterId"`
 	Difficulty  string    `json:"difficulty"`
 	Kill        bool      `json:"kill"`
-	BossPercent int       `json:"bossPercent"`
+	BossPercent float64   `json:"bossPercent"`
 }
 
 // FightSummary is a simplified version for initial fight selection

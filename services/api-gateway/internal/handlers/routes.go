@@ -14,7 +14,8 @@ func RegisterRoutes(mux *http.ServeMux, analyzeService *services.AnalyzeService,
 	mux.HandleFunc("/health", healthHandler)
 	mux.HandleFunc("/api/analyze/intake", analyzeHandler.HandleIntake)
 	mux.HandleFunc("/api/analyze/characters", analyzeHandler.HandleCharacters)
-	mux.HandleFunc("/api/report/generate", reportHandler.Generate)
+	mux.HandleFunc("/api/report/jobs", reportHandler.CreateJob)
+	mux.HandleFunc("/api/report/jobs/", reportHandler.GetJob)
 }
 
 func rootHandler(w http.ResponseWriter, r *http.Request) {

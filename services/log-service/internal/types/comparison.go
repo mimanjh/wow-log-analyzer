@@ -3,8 +3,35 @@ package types
 import "time"
 
 type ComparisonDataRequest struct {
-	FightID     int `json:"fightId"`
-	CharacterID int `json:"characterId"`
+	Fight       FightSelection `json:"fight"`
+	CharacterID int            `json:"characterId"`
+}
+
+type PlayerDataRequest struct {
+	Fight       FightSelection `json:"fight"`
+	CharacterID int            `json:"characterId"`
+}
+
+type RankingCandidatesRequest struct {
+	Fight          FightSelection `json:"fight"`
+	CharacterClass string         `json:"characterClass"`
+	CharacterSpec  string         `json:"characterSpec"`
+	Limit          int            `json:"limit,omitempty"`
+}
+
+type CohortMemberRequest struct {
+	Candidate RankingCandidate `json:"candidate"`
+}
+
+type FightSelection struct {
+	ID          int       `json:"id"`
+	Name        string    `json:"name"`
+	Difficulty  string    `json:"difficulty"`
+	KillTime    int       `json:"killTime"`
+	EncounterID int       `json:"encounterId"`
+	StartTime   time.Time `json:"startTime"`
+	EndTime     time.Time `json:"endTime"`
+	BossPercent float64   `json:"bossPercent,omitempty"`
 }
 
 type ComparisonDataResponse struct {
@@ -12,6 +39,18 @@ type ComparisonDataResponse struct {
 	Fight      FightSummary      `json:"fight"`
 	PlayerData PlayerFightData   `json:"playerData"`
 	CohortData []PlayerFightData `json:"cohortData"`
+}
+
+type RankingCandidate struct {
+	Name         string  `json:"name"`
+	Class        string  `json:"class"`
+	Spec         string  `json:"spec"`
+	Server       string  `json:"server,omitempty"`
+	ServerRegion string  `json:"serverRegion,omitempty"`
+	ReportID     string  `json:"reportId"`
+	FightID      int     `json:"fightId"`
+	RankValue    float64 `json:"rankValue"`
+	DurationMS   int     `json:"durationMs"`
 }
 
 type CharacterOption struct {

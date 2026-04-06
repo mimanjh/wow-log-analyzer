@@ -6,7 +6,9 @@ import (
 	"io"
 	"log"
 	"net/http"
+	neturl "net/url"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 )
@@ -17,9 +19,10 @@ var (
 )
 
 type UrlValidationResult struct {
-	IsValid  bool   `json:"isValid"`
-	ReportID string `json:"reportId,omitempty"`
-	Error    string `json:"error,omitempty"`
+	IsValid          bool   `json:"isValid"`
+	ReportID         string `json:"reportId,omitempty"`
+	PreferredFightID int    `json:"preferredFightId,omitempty"`
+	Error            string `json:"error,omitempty"`
 }
 
 type AnalyzeIntakeRequest struct {
@@ -27,17 +30,21 @@ type AnalyzeIntakeRequest struct {
 }
 
 type AnalyzeIntakeResponse struct {
-	ReportID   string             `json:"reportId"`
-	Fights     []FightSummary     `json:"fights"`
-	Characters []CharacterSummary `json:"characters"`
+	ReportID         string             `json:"reportId"`
+	PreferredFightID int                `json:"preferredFightId,omitempty"`
+	Fights           []FightSummary     `json:"fights"`
+	Characters       []CharacterSummary `json:"characters"`
 }
 
 type FightSummary struct {
-	ID          int    `json:"id"`
-	Name        string `json:"name"`
-	Difficulty  string `json:"difficulty"`
-	KillTime    int    `json:"killTime"`
-	EncounterID int    `json:"encounterId"`
+	ID          int       `json:"id"`
+	Name        string    `json:"name"`
+	Difficulty  string    `json:"difficulty"`
+	KillTime    int       `json:"killTime"`
+	EncounterID int       `json:"encounterId"`
+	StartTime   time.Time `json:"startTime"`
+	EndTime     time.Time `json:"endTime"`
+	BossPercent float64   `json:"bossPercent,omitempty"`
 }
 
 type CharacterSummary struct {
@@ -88,7 +95,7 @@ func (c *LogServiceClient) GetFights(reportID string) ([]FightSummary, error) {
 		EncounterID int       `json:"encounterId"`
 		Difficulty  string    `json:"difficulty"`
 		Kill        bool      `json:"kill"`
-		BossPercent int       `json:"bossPercent"`
+		BossPercent float64   `json:"bossPercent"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&normalizedFights); err != nil {
 		return nil, fmt.Errorf("failed to decode fights response: %w", err)
@@ -104,6 +111,9 @@ func (c *LogServiceClient) GetFights(reportID string) ([]FightSummary, error) {
 			Difficulty:  nf.Difficulty,
 			KillTime:    killTime,
 			EncounterID: nf.EncounterID,
+			StartTime:   nf.StartTime,
+			EndTime:     nf.EndTime,
+			BossPercent: nf.BossPercent,
 		}
 	}
 
@@ -181,9 +191,12 @@ func (s *AnalyzeService) ValidateAndParseUrl(rawUrl string) UrlValidationResult 
 		}
 	}
 
+	preferredFightID := extractFightID(trimmed)
+
 	return UrlValidationResult{
-		IsValid:  true,
-		ReportID: reportID,
+		IsValid:          true,
+		ReportID:         reportID,
+		PreferredFightID: preferredFightID,
 	}
 }
 
@@ -200,6 +213,8 @@ func (s *AnalyzeService) ProcessIntake(req AnalyzeIntakeRequest) (AnalyzeIntakeR
 		return AnalyzeIntakeResponse{}, fmt.Errorf("failed to retrieve fights: %w", err)
 	}
 
+	fights = prioritizeFight(fights, validation.PreferredFightID)
+
 	characters := []CharacterSummary{}
 	if len(fights) > 0 {
 		characters, err = s.logClient.GetCharacters(validation.ReportID, fights[0].ID)
@@ -210,9 +225,10 @@ func (s *AnalyzeService) ProcessIntake(req AnalyzeIntakeRequest) (AnalyzeIntakeR
 	}
 
 	return AnalyzeIntakeResponse{
-		ReportID:   validation.ReportID,
-		Fights:     fights,
-		Characters: characters,
+		ReportID:         validation.ReportID,
+		PreferredFightID: validation.PreferredFightID,
+		Fights:           fights,
+		Characters:       characters,
 	}, nil
 }
 
@@ -231,4 +247,55 @@ func (s *AnalyzeService) GetCharactersForFight(reportID string, fightID int) ([]
 	}
 
 	return characters, nil
+}
+
+func extractFightID(rawURL string) int {
+	parsed, err := neturl.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return 0
+	}
+
+	if fightID := parseFightID(parsed.Query().Get("fight")); fightID != 0 {
+		return fightID
+	}
+
+	fragment := strings.TrimPrefix(parsed.Fragment, "#")
+	hashParams, err := neturl.ParseQuery(fragment)
+	if err != nil {
+		return 0
+	}
+
+	return parseFightID(hashParams.Get("fight"))
+}
+
+func parseFightID(value string) int {
+	if strings.TrimSpace(value) == "" {
+		return 0
+	}
+
+	var fightID int
+	if _, err := fmt.Sscanf(value, "%d", &fightID); err != nil || fightID <= 0 {
+		return 0
+	}
+
+	return fightID
+}
+
+func prioritizeFight(fights []FightSummary, preferredFightID int) []FightSummary {
+	if preferredFightID == 0 || len(fights) < 2 {
+		return fights
+	}
+
+	prioritized := append([]FightSummary(nil), fights...)
+	sort.SliceStable(prioritized, func(i, j int) bool {
+		if prioritized[i].ID == preferredFightID {
+			return true
+		}
+		if prioritized[j].ID == preferredFightID {
+			return false
+		}
+		return false
+	})
+
+	return prioritized
 }

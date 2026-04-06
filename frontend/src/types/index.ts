@@ -2,18 +2,21 @@ export interface AnalyzeState {
   reportUrl: string
   setReportUrl: (reportUrl: string) => void
   reportId: string | null
+  preferredFightId: number | null
   fights: Fight[]
   characters: Character[]
   charactersFightId: number | null
   selectedFight: Fight | null
   selectedCharacter: Character | null
+  reportJob: ReportJob | null
   reportResult: ReportResult | null
   isLoading: boolean
   error: string | null
-  setReportData: (data: { reportId: string | null; fights: Fight[]; characters: Character[] }) => void
+  setReportData: (data: { reportId: string | null; preferredFightId?: number | null; fights: Fight[]; characters: Character[] }) => void
   setCharactersForFight: (fightId: number, characters: Character[]) => void
   setSelectedFight: (fight: Fight | null) => void
   setSelectedCharacter: (character: Character | null) => void
+  setReportJob: (job: ReportJob | null) => void
   setReportResult: (result: ReportResult | null) => void
   setLoading: (loading: boolean) => void
   setError: (error: string | null) => void
@@ -26,6 +29,9 @@ export interface Fight {
   difficulty: string
   killTime: number
   encounterId: number
+  startTime: string
+  endTime: string
+  bossPercent?: number
 }
 
 export interface Character {
@@ -48,6 +54,17 @@ export interface ReportResult {
   character: Character
   comparison: ComparisonResult
   ai: AISection
+}
+
+export interface ReportJob {
+  jobId: string
+  status: "queued" | "running" | "completed" | "failed"
+  stage: string
+  message: string
+  error?: string
+  result?: ReportResult
+  createdAt: string
+  updatedAt: string
 }
 
 export interface AISection {

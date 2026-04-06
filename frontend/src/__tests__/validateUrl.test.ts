@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { validateWarcraftLogsUrl, isValidWarcraftLogsUrl, extractReportId } from '../lib/validateUrl'
+import { validateWarcraftLogsUrl, isValidWarcraftLogsUrl, extractFightId, extractReportId } from '../lib/validateUrl'
 
 describe('validateWarcraftLogsUrl', () => {
   it('validates a correct Warcraft Logs URL', () => {
@@ -75,6 +75,20 @@ describe('validateWarcraftLogsUrl', () => {
     expect(result.reportId).toBe('abc123')
   })
 
+  it('extracts a preferred fight id from query parameters', () => {
+    const result = validateWarcraftLogsUrl('https://www.warcraftlogs.com/reports/abc123?fight=4')
+    expect(result.isValid).toBe(true)
+    expect(result.reportId).toBe('abc123')
+    expect(result.fightId).toBe(4)
+  })
+
+  it('extracts a preferred fight id from hash parameters', () => {
+    const result = validateWarcraftLogsUrl('https://www.warcraftlogs.com/reports/abc123#fight=7')
+    expect(result.isValid).toBe(true)
+    expect(result.reportId).toBe('abc123')
+    expect(result.fightId).toBe(7)
+  })
+
   it('handles mixed case report codes', () => {
     const result = validateWarcraftLogsUrl('https://www.warcraftlogs.com/reports/AbC123')
     expect(result.isValid).toBe(true)
@@ -101,5 +115,19 @@ describe('extractReportId', () => {
   it('returns undefined for invalid URLs', () => {
     expect(extractReportId('https://google.com')).toBeUndefined()
     expect(extractReportId('')).toBeUndefined()
+  })
+})
+
+describe('extractFightId', () => {
+  it('extracts fight id from query parameters', () => {
+    expect(extractFightId('https://www.warcraftlogs.com/reports/abc123?fight=4')).toBe(4)
+  })
+
+  it('extracts fight id from hash parameters', () => {
+    expect(extractFightId('https://www.warcraftlogs.com/reports/abc123#fight=8')).toBe(8)
+  })
+
+  it('returns undefined when no fight id is present', () => {
+    expect(extractFightId('https://www.warcraftlogs.com/reports/abc123')).toBeUndefined()
   })
 })

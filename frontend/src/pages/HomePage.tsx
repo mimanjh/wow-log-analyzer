@@ -1,16 +1,33 @@
 import { useNavigate } from "react-router-dom";
+import { useState } from "react";
 import { UrlIntakeForm } from "../features/url-intake/UrlIntakeForm";
 import { useAnalyzeStore } from "../stores/useAnalyzeStore";
 import { usePageTitle } from "../hooks/usePageTitle";
+import { analyzeReport } from "../lib/api";
 
 export function HomePage() {
     usePageTitle("Home");
-    const setReportUrl = useAnalyzeStore((state) => state.setReportUrl);
+    const { reportUrl, setReportUrl, setReportData, setLoading, setError, isLoading } =
+        useAnalyzeStore();
     const navigate = useNavigate();
+    const [submitError, setSubmitError] = useState<string | null>(null);
 
-    function handleSubmit(url: string) {
+    async function handleSubmit(url: string) {
+        setSubmitError(null);
         setReportUrl(url);
-        navigate("/analyze");
+        setLoading(true);
+        setError(null);
+
+        try {
+            const data = await analyzeReport(url);
+            setReportData(data);
+            navigate("/analyze");
+        } catch (err) {
+            const message =
+                err instanceof Error ? err.message : "Failed to load report";
+            setSubmitError(message);
+            setError(message);
+        }
     }
 
     return (
@@ -30,7 +47,12 @@ export function HomePage() {
 
             <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
                 <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-8">
-                    <UrlIntakeForm onSubmit={handleSubmit} />
+                    <UrlIntakeForm
+                        onSubmit={handleSubmit}
+                        isSubmitting={isLoading}
+                        submitError={submitError}
+                        initialUrl={reportUrl}
+                    />
                 </div>
                 <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-8">
                     <h2 className="text-2xl font-semibold text-white">

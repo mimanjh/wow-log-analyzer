@@ -1,12 +1,63 @@
+import { useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useAnalyzeStore } from "../stores/useAnalyzeStore";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { Button } from "../components/ui/Button";
 import { MetricCard } from "../components/MetricCard";
+import { getReportJob } from "../lib/api";
 
 export function ReportPage() {
     usePageTitle("Report");
-    const { reportResult } = useAnalyzeStore();
+    const {
+        reportJob,
+        reportResult,
+        setReportJob,
+        setReportResult,
+        setError,
+    } = useAnalyzeStore();
+
+    useEffect(() => {
+        if (
+            !reportJob ||
+            reportJob.status === "completed" ||
+            reportJob.status === "failed"
+        ) {
+            return;
+        }
+
+        let cancelled = false;
+        const intervalId = window.setInterval(async () => {
+            try {
+                const nextJob = await getReportJob(reportJob.jobId);
+                if (cancelled) {
+                    return;
+                }
+
+                setReportJob(nextJob);
+                if (nextJob.result) {
+                    setReportResult(nextJob.result);
+                }
+                if (nextJob.status === "failed" && nextJob.error) {
+                    setError(nextJob.error);
+                }
+            } catch (err) {
+                if (cancelled) {
+                    return;
+                }
+
+                setError(
+                    err instanceof Error
+                        ? err.message
+                        : "Failed to refresh report status",
+                );
+            }
+        }, 2000);
+
+        return () => {
+            cancelled = true;
+            window.clearInterval(intervalId);
+        };
+    }, [reportJob, setError, setReportJob, setReportResult]);
 
     if (!reportResult) {
         return (
@@ -16,15 +67,38 @@ export function ReportPage() {
                         Report
                     </p>
                     <h1 className="mt-3 text-3xl font-semibold text-white">
-                        No analysis data available
+                        {reportJob
+                            ? "Report generation in progress"
+                            : "No analysis data available"}
                     </h1>
                     <p className="mt-4 max-w-2xl text-slate-300">
-                        Please go back to the analyze page and select a fight
-                        and character.
+                        {reportJob
+                            ? reportJob.message
+                            : "Please go back to the analyze page and select a fight and character."}
                     </p>
-                    <div className="mt-8">
+
+                    {reportJob && (
+                        <div className="mt-6 rounded-3xl border border-slate-800 bg-slate-950/80 p-6">
+                            <p className="text-sm uppercase tracking-[0.2em] text-sky-400">
+                                {reportJob.stage}
+                            </p>
+                            <p className="mt-3 text-sm text-slate-300">
+                                Status: {reportJob.status}
+                            </p>
+                            {reportJob.error && (
+                                <p className="mt-3 text-sm text-rose-400">
+                                    {reportJob.error}
+                                </p>
+                            )}
+                        </div>
+                    )}
+
+                    <div className="mt-8 flex flex-col gap-3 sm:flex-row">
                         <Link to="/analyze">
-                            <Button>Back to analyze</Button>
+                            <Button variant="secondary">Back to analyze</Button>
+                        </Link>
+                        <Link to="/">
+                            <Button variant="secondary">Back to home</Button>
                         </Link>
                     </div>
                 </div>
@@ -50,7 +124,6 @@ export function ReportPage() {
                 </p>
             </div>
 
-            {/* Fight and Character Summary */}
             <div className="grid gap-6 lg:grid-cols-2">
                 <div className="rounded-3xl border border-slate-800 bg-slate-950/80 p-6">
                     <h2 className="text-lg font-semibold text-white">

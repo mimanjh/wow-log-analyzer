@@ -24,7 +24,7 @@ type WCLFight struct {
 	EncounterID    int    `json:"encounterID"`
 	Difficulty     int    `json:"difficulty"`
 	Kill           bool   `json:"kill"`
-	BossPercentage int    `json:"bossPercentage"`
+	BossPercentage float64 `json:"bossPercentage"`
 }
 
 type WCLActor struct {
@@ -35,6 +35,37 @@ type WCLActor struct {
 	Server   string  `json:"server"`
 	SubType  string  `json:"subType"`
 	Type     string  `json:"type"`
+}
+
+type WCLRankingReport struct {
+	Code      string `json:"code"`
+	FightID   int    `json:"fightID"`
+	StartTime int64  `json:"startTime"`
+}
+
+type WCLRankingServer struct {
+	ID     int    `json:"id"`
+	Name   string `json:"name"`
+	Region string `json:"region"`
+}
+
+type WCLRankingEntry struct {
+	Name      string           `json:"name"`
+	Class     string           `json:"class"`
+	Spec      string           `json:"spec"`
+	Amount    float64          `json:"amount"`
+	Duration  int              `json:"duration"`
+	StartTime int64            `json:"startTime"`
+	Report    WCLRankingReport `json:"report"`
+	Server    WCLRankingServer `json:"server"`
+}
+
+type WCLCharacterRankingsResponse struct {
+	Page         int               `json:"page"`
+	HasMorePages bool              `json:"hasMorePages"`
+	Count        int               `json:"count"`
+	Rankings     []WCLRankingEntry `json:"rankings"`
+	Error        string            `json:"error"`
 }
 
 type WCLTokenResponse struct {

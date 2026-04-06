@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useAnalyzeStore } from "../stores/useAnalyzeStore";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { Button } from "../components/ui/Button";
-import { analyzeReport, generateReport, getCharacters } from "../lib/api";
+import { createReportJob, getCharacters } from "../lib/api";
 
 export function AnalyzePage() {
     usePageTitle("Analyze");
@@ -18,38 +18,14 @@ export function AnalyzePage() {
         selectedCharacter,
         isLoading,
         error,
-        setReportData,
         setCharactersForFight,
         setSelectedFight,
         setSelectedCharacter,
+        setReportJob,
         setReportResult,
         setLoading,
         setError,
     } = useAnalyzeStore();
-
-    useEffect(() => {
-        if (!reportUrl || reportId || isLoading) {
-            return;
-        }
-
-        setLoading(true);
-        setError(null);
-
-        analyzeReport(reportUrl)
-            .then((data) => {
-                setReportData(data);
-            })
-            .catch((err) => {
-                setError(err.message);
-            });
-    }, [
-        reportUrl,
-        isLoading,
-        reportId,
-        setReportData,
-        setLoading,
-        setError,
-    ]);
 
     useEffect(() => {
         if (
@@ -96,12 +72,13 @@ export function AnalyzePage() {
         setError(null);
 
         try {
-            const result = await generateReport(
+            setReportResult(null);
+            const job = await createReportJob(
                 reportId,
                 selectedFight,
                 selectedCharacter,
             );
-            setReportResult(result);
+            setReportJob(job);
             navigate("/report");
         } catch (err) {
             setError(
@@ -170,7 +147,8 @@ export function AnalyzePage() {
                     <div className="mt-6 rounded-3xl border border-slate-800 bg-slate-950/80 p-6">
                         <p className="text-sm text-slate-400">
                             {reportId
-                                ? selectedFight && !selectedCharacter
+                                ? selectedFight &&
+                                  charactersFightId !== selectedFight.id
                                     ? "Loading characters..."
                                     : "Generating report..."
                                 : "Loading report data..."}

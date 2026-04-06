@@ -3,10 +3,13 @@ package services
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -137,15 +140,31 @@ type MetricRankings struct {
 }
 
 type logComparisonRequest struct {
-	FightID     int `json:"fightId"`
-	CharacterID int `json:"characterId"`
+	Fight       FightSummary `json:"fight"`
+	CharacterID int          `json:"characterId"`
 }
 
-type logComparisonResponse struct {
-	ReportID   string            `json:"reportId"`
-	Fight      FightSummary      `json:"fight"`
-	PlayerData json.RawMessage   `json:"playerData"`
-	CohortData []json.RawMessage `json:"cohortData"`
+type logRankingCandidatesRequest struct {
+	Fight          FightSummary `json:"fight"`
+	CharacterClass string       `json:"characterClass"`
+	CharacterSpec  string       `json:"characterSpec"`
+	Limit          int          `json:"limit"`
+}
+
+type logCohortMemberRequest struct {
+	Candidate RankingCandidate `json:"candidate"`
+}
+
+type RankingCandidate struct {
+	Name         string  `json:"name"`
+	Class        string  `json:"class"`
+	Spec         string  `json:"spec"`
+	Server       string  `json:"server,omitempty"`
+	ServerRegion string  `json:"serverRegion,omitempty"`
+	ReportID     string  `json:"reportId"`
+	FightID      int     `json:"fightId"`
+	RankValue    float64 `json:"rankValue"`
+	DurationMS   int     `json:"durationMs"`
 }
 
 type analysisCompareRequest struct {
@@ -203,6 +222,26 @@ type insightGenerationResponse struct {
 	Model               string              `json:"model"`
 }
 
+type ReportJobStatus string
+
+const (
+	ReportJobQueued    ReportJobStatus = "queued"
+	ReportJobRunning   ReportJobStatus = "running"
+	ReportJobCompleted ReportJobStatus = "completed"
+	ReportJobFailed    ReportJobStatus = "failed"
+)
+
+type ReportJob struct {
+	ID        string                  `json:"jobId"`
+	Status    ReportJobStatus         `json:"status"`
+	Stage     string                  `json:"stage"`
+	Message   string                  `json:"message"`
+	Error     string                  `json:"error,omitempty"`
+	Result    *GenerateReportResponse `json:"result,omitempty"`
+	CreatedAt time.Time               `json:"createdAt"`
+	UpdatedAt time.Time               `json:"updatedAt"`
+}
+
 type ReportService struct {
 	logClient      *http.Client
 	analysisClient *http.Client
@@ -210,35 +249,101 @@ type ReportService struct {
 	logURL         string
 	analysisURL    string
 	aiURL          string
+
+	jobMu sync.RWMutex
+	jobs  map[string]ReportJob
 }
 
 func NewReportService(logURL, analysisURL, aiURL string) *ReportService {
+	const serviceTimeout = 120 * time.Second
+
 	return &ReportService{
-		logClient:      &http.Client{Timeout: 30 * time.Second},
-		analysisClient: &http.Client{Timeout: 30 * time.Second},
-		aiClient:       &http.Client{Timeout: 30 * time.Second},
+		logClient:      &http.Client{Timeout: serviceTimeout},
+		analysisClient: &http.Client{Timeout: serviceTimeout},
+		aiClient:       &http.Client{Timeout: serviceTimeout},
 		logURL:         logURL,
 		analysisURL:    analysisURL,
 		aiURL:          aiURL,
+		jobs:           make(map[string]ReportJob),
 	}
 }
 
-func (s *ReportService) Generate(ctx context.Context, req GenerateReportRequest) (GenerateReportResponse, error) {
+func (s *ReportService) CreateJob(req GenerateReportRequest) (ReportJob, error) {
 	if req.ReportID == "" {
-		return GenerateReportResponse{}, fmt.Errorf("reportId is required")
+		return ReportJob{}, fmt.Errorf("reportId is required")
 	}
 	if req.Fight.ID == 0 || req.Character.ID == 0 {
-		return GenerateReportResponse{}, fmt.Errorf("fight and character selections are required")
+		return ReportJob{}, fmt.Errorf("fight and character selections are required")
 	}
 
-	logData, err := s.fetchNormalizedComparisonData(ctx, req)
-	if err != nil {
-		return GenerateReportResponse{}, fmt.Errorf("failed to retrieve normalized comparison data: %w", err)
+	job := ReportJob{
+		ID:        newJobID(),
+		Status:    ReportJobQueued,
+		Stage:     "queued",
+		Message:   "Queued for report generation.",
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
 	}
 
-	comparison, err := s.fetchComparison(ctx, logData)
+	s.setJob(job)
+
+	go s.runJob(job.ID, req)
+
+	return job, nil
+}
+
+func (s *ReportService) GetJob(jobID string) (ReportJob, error) {
+	s.jobMu.RLock()
+	defer s.jobMu.RUnlock()
+
+	job, ok := s.jobs[jobID]
+	if !ok {
+		return ReportJob{}, fmt.Errorf("report job %s not found", jobID)
+	}
+
+	return job, nil
+}
+
+func (s *ReportService) runJob(jobID string, req GenerateReportRequest) {
+	ctx := context.Background()
+
+	s.updateJob(jobID, ReportJobRunning, "player-data", "Fetching selected player fight data.", "", nil)
+	playerData, err := s.fetchPlayerData(ctx, req)
 	if err != nil {
-		return GenerateReportResponse{}, fmt.Errorf("failed to retrieve comparison results: %w", err)
+		s.updateJob(jobID, ReportJobFailed, "player-data", "Failed to fetch selected player fight data.", err.Error(), nil)
+		return
+	}
+
+	s.updateJob(jobID, ReportJobRunning, "rankings", "Fetching ranking candidates for the selected boss and spec.", "", nil)
+	candidates, err := s.fetchRankingCandidates(ctx, req)
+	if err != nil {
+		s.updateJob(jobID, ReportJobFailed, "rankings", "Failed to fetch ranking candidates.", err.Error(), nil)
+		return
+	}
+	if len(candidates) == 0 {
+		s.updateJob(jobID, ReportJobFailed, "rankings", "No ranking candidates were available for this fight.", "no ranking candidates returned", nil)
+		return
+	}
+
+	cohortData := make([]json.RawMessage, 0, len(candidates))
+	for index, candidate := range candidates {
+		s.updateJob(jobID, ReportJobRunning, "cohort", fmt.Sprintf("Fetching cohort member %d of %d.", index+1, len(candidates)), "", nil)
+		memberData, err := s.fetchCohortMember(ctx, candidate)
+		if err != nil {
+			continue
+		}
+		cohortData = append(cohortData, memberData)
+	}
+	if len(cohortData) == 0 {
+		s.updateJob(jobID, ReportJobFailed, "cohort", "Failed to collect any cohort members.", "no cohort member data could be fetched", nil)
+		return
+	}
+
+	s.updateJob(jobID, ReportJobRunning, "analyzing", "Running deterministic comparison analysis.", "", nil)
+	comparison, err := s.fetchComparison(ctx, playerData, cohortData)
+	if err != nil {
+		s.updateJob(jobID, ReportJobFailed, "analyzing", "Failed to compute deterministic comparison metrics.", err.Error(), nil)
+		return
 	}
 
 	response := GenerateReportResponse{
@@ -251,10 +356,12 @@ func (s *ReportService) Generate(ctx context.Context, req GenerateReportRequest)
 		},
 	}
 
+	s.updateJob(jobID, ReportJobRunning, "insights", "Generating AI insights.", "", &response)
 	insights, err := s.fetchInsights(ctx, req, response.Comparison)
 	if err != nil {
 		response.AI.Warning = "AI insights were unavailable. Deterministic metrics are still shown."
-		return response, nil
+		s.updateJob(jobID, ReportJobCompleted, "completed", "Report completed without AI insights.", "", &response)
+		return
 	}
 
 	response.AI = AIReportSection{
@@ -264,52 +371,150 @@ func (s *ReportService) Generate(ctx context.Context, req GenerateReportRequest)
 		Insights:            insights.Insights,
 		FocusRecommendation: insights.FocusRecommendation,
 	}
-
 	if insights.FallbackUsed {
 		response.AI.Warning = "AI used the deterministic fallback formatter for this report."
 	}
 
-	return response, nil
+	s.updateJob(jobID, ReportJobCompleted, "completed", "Report completed.", "", &response)
 }
 
-func (s *ReportService) fetchNormalizedComparisonData(ctx context.Context, req GenerateReportRequest) (logComparisonResponse, error) {
+func (s *ReportService) setJob(job ReportJob) {
+	s.jobMu.Lock()
+	defer s.jobMu.Unlock()
+	s.jobs[job.ID] = job
+}
+
+func (s *ReportService) updateJob(jobID string, status ReportJobStatus, stage, message, errText string, result *GenerateReportResponse) {
+	s.jobMu.Lock()
+	defer s.jobMu.Unlock()
+
+	job, ok := s.jobs[jobID]
+	if !ok {
+		return
+	}
+
+	job.Status = status
+	job.Stage = stage
+	job.Message = message
+	job.Error = errText
+	job.Result = result
+	job.UpdatedAt = time.Now().UTC()
+	s.jobs[jobID] = job
+}
+
+func newJobID() string {
+	randomBytes := make([]byte, 8)
+	if _, err := rand.Read(randomBytes); err != nil {
+		return fmt.Sprintf("job-%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(randomBytes)
+}
+
+func (s *ReportService) fetchPlayerData(ctx context.Context, req GenerateReportRequest) (json.RawMessage, error) {
 	body, err := json.Marshal(logComparisonRequest{
-		FightID:     req.Fight.ID,
+		Fight:       req.Fight,
 		CharacterID: req.Character.ID,
 	})
 	if err != nil {
-		return logComparisonResponse{}, err
+		return nil, err
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/reports/%s/comparison-data", s.logURL, req.ReportID), bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/reports/%s/player-data", s.logURL, req.ReportID), bytes.NewReader(body))
 	if err != nil {
-		return logComparisonResponse{}, err
+		return nil, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
 	resp, err := s.logClient.Do(httpReq)
 	if err != nil {
-		return logComparisonResponse{}, err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		return logComparisonResponse{}, fmt.Errorf("log-service returned status %d: %s", resp.StatusCode, string(bodyBytes))
+		return nil, fmt.Errorf("log-service returned status %d: %s", resp.StatusCode, string(bodyBytes))
 	}
 
-	var payload logComparisonResponse
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return logComparisonResponse{}, err
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
 	}
 
-	return payload, nil
+	return json.RawMessage(bodyBytes), nil
 }
 
-func (s *ReportService) fetchComparison(ctx context.Context, payload logComparisonResponse) (ComparisonResult, error) {
+func (s *ReportService) fetchRankingCandidates(ctx context.Context, req GenerateReportRequest) ([]RankingCandidate, error) {
+	body, err := json.Marshal(logRankingCandidatesRequest{
+		Fight:          req.Fight,
+		CharacterClass: req.Character.Class,
+		CharacterSpec:  req.Character.Spec,
+		Limit:          10,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, s.logURL+"/rankings/candidates", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := s.logClient.Do(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("log-service returned status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var candidates []RankingCandidate
+	if err := json.NewDecoder(resp.Body).Decode(&candidates); err != nil {
+		return nil, err
+	}
+
+	return candidates, nil
+}
+
+func (s *ReportService) fetchCohortMember(ctx context.Context, candidate RankingCandidate) (json.RawMessage, error) {
+	body, err := json.Marshal(logCohortMemberRequest{Candidate: candidate})
+	if err != nil {
+		return nil, err
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, s.logURL+"/cohort/member-data", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := s.logClient.Do(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("log-service returned status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	return json.RawMessage(bodyBytes), nil
+}
+
+func (s *ReportService) fetchComparison(ctx context.Context, playerData json.RawMessage, cohortData []json.RawMessage) (ComparisonResult, error) {
 	body, err := json.Marshal(analysisCompareRequest{
-		PlayerData: payload.PlayerData,
-		CohortData: payload.CohortData,
+		PlayerData: playerData,
+		CohortData: cohortData,
 	})
 	if err != nil {
 		return ComparisonResult{}, err

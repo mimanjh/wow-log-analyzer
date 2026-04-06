@@ -119,12 +119,100 @@ func (h *Handler) GetComparisonData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.FightID == 0 || req.CharacterID == 0 {
-		http.Error(w, "fightId and characterId are required", http.StatusBadRequest)
+	if req.Fight.ID == 0 || req.CharacterID == 0 {
+		http.Error(w, "fight.id and characterId are required", http.StatusBadRequest)
 		return
 	}
 
-	response, err := h.logService.GetComparisonData(reportID, req.FightID, req.CharacterID)
+	response, err := h.logService.GetComparisonData(reportID, req.Fight, req.CharacterID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+func (h *Handler) GetPlayerData(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	reportID := strings.TrimPrefix(r.URL.Path, "/reports/")
+	reportID = strings.TrimSuffix(reportID, "/player-data")
+	if reportID == "" {
+		http.Error(w, "Report ID is required", http.StatusBadRequest)
+		return
+	}
+
+	var req types.PlayerDataRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	if req.Fight.ID == 0 || req.CharacterID == 0 {
+		http.Error(w, "fight.id and characterId are required", http.StatusBadRequest)
+		return
+	}
+
+	response, err := h.logService.GetPlayerFightData(reportID, req.Fight, req.CharacterID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+func (h *Handler) GetRankingCandidates(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req types.RankingCandidatesRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	if req.Fight.ID == 0 || strings.TrimSpace(req.CharacterClass) == "" || strings.TrimSpace(req.CharacterSpec) == "" {
+		http.Error(w, "fight, characterClass, and characterSpec are required", http.StatusBadRequest)
+		return
+	}
+
+	candidates, err := h.logService.GetRankingCandidates(req.Fight, req.CharacterClass, req.CharacterSpec, req.Limit)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(candidates)
+}
+
+func (h *Handler) GetCohortMemberData(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req types.CohortMemberRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	if req.Candidate.ReportID == "" || req.Candidate.FightID == 0 {
+		http.Error(w, "candidate reportId and fightId are required", http.StatusBadRequest)
+		return
+	}
+
+	response, err := h.logService.GetCohortMemberData(req.Candidate)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

@@ -32,6 +32,18 @@ func (s *LogService) GetCharacters(reportID string, fightID int) ([]types.Charac
 	return s.wclClient.GetCharacters(reportID, fightID)
 }
 
-func (s *LogService) GetComparisonData(reportID string, fightID int, characterID int) (*types.ComparisonDataResponse, error) {
-	return s.wclClient.GetComparisonData(reportID, fightID, characterID)
+func (s *LogService) GetComparisonData(reportID string, fight types.FightSelection, characterID int) (*types.ComparisonDataResponse, error) {
+	return s.wclClient.GetComparisonData(reportID, fight, characterID)
+}
+
+func (s *LogService) GetPlayerFightData(reportID string, fight types.FightSelection, characterID int) (*types.PlayerFightData, error) {
+	return s.wclClient.GetPlayerFightData(reportID, fight, characterID)
+}
+
+func (s *LogService) GetRankingCandidates(fight types.FightSelection, characterClass, characterSpec string, limit int) ([]types.RankingCandidate, error) {
+	return s.wclClient.GetRankingCandidates(fight, characterClass, characterSpec, limit)
+}
+
+func (s *LogService) GetCohortMemberData(candidate types.RankingCandidate) (*types.PlayerFightData, error) {
+	return s.wclClient.GetCohortMemberData(candidate)
 }
