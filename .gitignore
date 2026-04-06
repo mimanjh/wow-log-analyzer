@@ -1,0 +1,27 @@
+# Local environment
+.env
+.env.*
+!.env.example
+
+# AI workflow docs
+AGENTS.md
+MVP_SPEC.md
+PROJECT_CONTEXT.md
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/coverage/
+
+# Go
+services/**/server.exe
+services/**/bin/
+services/**/coverage.out
+services/**/.gocache/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
