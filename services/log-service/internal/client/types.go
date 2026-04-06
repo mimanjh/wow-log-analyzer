@@ -2,10 +2,10 @@ package client
 
 // WCLReport represents the raw Warcraft Logs API report structure
 type WCLReport struct {
-	Code      string `json:"code"`
-	Title     string `json:"title"`
-	StartTime int64  `json:"startTime"`
-	EndTime   int64  `json:"endTime"`
+	Code      string  `json:"code"`
+	Title     string  `json:"title"`
+	StartTime int64   `json:"startTime"`
+	EndTime   int64   `json:"endTime"`
 	Zone      WCLZone `json:"zone"`
 }
 
@@ -25,4 +25,20 @@ type WCLFight struct {
 	Difficulty     int    `json:"difficulty"`
 	Kill           bool   `json:"kill"`
 	BossPercentage int    `json:"bossPercentage"`
+}
+
+type WCLActor struct {
+	GameID   float64 `json:"gameID"`
+	ID       int     `json:"id"`
+	Name     string  `json:"name"`
+	PetOwner int     `json:"petOwner"`
+	Server   string  `json:"server"`
+	SubType  string  `json:"subType"`
+	Type     string  `json:"type"`
+}
+
+type WCLTokenResponse struct {
+	AccessToken string `json:"access_token"`
+	TokenType   string `json:"token_type"`
+	ExpiresIn   int    `json:"expires_in"`
 }

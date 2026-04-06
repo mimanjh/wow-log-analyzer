@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useAnalyzeStore } from "../stores/useAnalyzeStore";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { Button } from "../components/ui/Button";
-import { analyzeReport, generateReport } from "../lib/api";
+import { analyzeReport, generateReport, getCharacters } from "../lib/api";
 
 export function AnalyzePage() {
     usePageTitle("Analyze");
@@ -13,11 +13,13 @@ export function AnalyzePage() {
         reportId,
         fights,
         characters,
+        charactersFightId,
         selectedFight,
         selectedCharacter,
         isLoading,
         error,
         setReportData,
+        setCharactersForFight,
         setSelectedFight,
         setSelectedCharacter,
         setReportResult,
@@ -45,6 +47,42 @@ export function AnalyzePage() {
         isLoading,
         reportId,
         setReportData,
+        setLoading,
+        setError,
+    ]);
+
+    useEffect(() => {
+        if (
+            !reportId ||
+            !selectedFight ||
+            isLoading ||
+            charactersFightId === selectedFight.id
+        ) {
+            return;
+        }
+
+        setLoading(true);
+        setError(null);
+
+        getCharacters(reportId, selectedFight.id)
+            .then((nextCharacters) => {
+                setCharactersForFight(selectedFight.id, nextCharacters);
+                setSelectedCharacter(null);
+            })
+            .catch((err) => {
+                setError(
+                    err instanceof Error
+                        ? err.message
+                        : "Failed to load characters",
+                );
+            });
+    }, [
+        reportId,
+        selectedFight,
+        charactersFightId,
+        isLoading,
+        setCharactersForFight,
+        setSelectedCharacter,
         setLoading,
         setError,
     ]);
@@ -132,7 +170,9 @@ export function AnalyzePage() {
                     <div className="mt-6 rounded-3xl border border-slate-800 bg-slate-950/80 p-6">
                         <p className="text-sm text-slate-400">
                             {reportId
-                                ? "Generating report..."
+                                ? selectedFight && !selectedCharacter
+                                    ? "Loading characters..."
+                                    : "Generating report..."
                                 : "Loading report data..."}
                         </p>
                     </div>

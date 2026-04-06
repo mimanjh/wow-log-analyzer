@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strconv"
 
 	"wow-log-analyzer/services/api-gateway/internal/services"
 )
@@ -52,5 +53,38 @@ func (h *AnalyzeHandler) HandleIntake(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		log.Printf("Failed to encode response: %v", err)
+	}
+}
+
+func (h *AnalyzeHandler) HandleCharacters(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	reportID := r.URL.Query().Get("reportId")
+	fightIDParam := r.URL.Query().Get("fightId")
+	if reportID == "" || fightIDParam == "" {
+		http.Error(w, "reportId and fightId are required", http.StatusBadRequest)
+		return
+	}
+
+	fightID, err := strconv.Atoi(fightIDParam)
+	if err != nil || fightID == 0 {
+		http.Error(w, "fightId must be a valid integer", http.StatusBadRequest)
+		return
+	}
+
+	characters, err := h.analyzeService.GetCharactersForFight(reportID, fightID)
+	if err != nil {
+		log.Printf("Failed to get characters: %v", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(characters); err != nil {
+		log.Printf("Failed to encode characters response: %v", err)
 	}
 }

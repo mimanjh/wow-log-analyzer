@@ -3,9 +3,9 @@ package config
 import "os"
 
 type Config struct {
-	Port    string
-	Env     string
-	WCL     WCLConfig
+	Port string
+	Env  string
+	WCL  WCLConfig
 }
 
 type WCLConfig struct {
@@ -16,18 +16,28 @@ type WCLConfig struct {
 
 func Load() Config {
 	return Config{
-		Port: getEnv("PORT", "8081"),
+		Port: firstEnv("PORT", "LOG_SERVICE_PORT", "8081"),
 		Env:  getEnv("ENV", "development"),
 		WCL: WCLConfig{
-			ClientID:     getEnv("WCL_CLIENT_ID", ""),
-			ClientSecret: getEnv("WCL_CLIENT_SECRET", ""),
-			BaseURL:      getEnv("WCL_BASE_URL", "https://www.warcraftlogs.com/api/v2"),
+			ClientID:     firstEnv("WCL_CLIENT_ID", "WARCRAFTLOGS_CLIENT_ID", ""),
+			ClientSecret: firstEnv("WCL_CLIENT_SECRET", "WARCRAFTLOGS_CLIENT_SECRET", ""),
+			BaseURL:      firstEnv("WCL_BASE_URL", "WARCRAFTLOGS_BASE_URL", "https://www.warcraftlogs.com/api/v2"),
 		},
 	}
 }
 
 func getEnv(key, fallback string) string {
 	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return fallback
+}
+
+func firstEnv(primary, secondary, fallback string) string {
+	if value := os.Getenv(primary); value != "" {
+		return value
+	}
+	if value := os.Getenv(secondary); value != "" {
 		return value
 	}
 	return fallback

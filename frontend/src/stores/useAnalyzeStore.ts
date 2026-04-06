@@ -6,6 +6,7 @@ const initialState = {
   reportId: null,
   fights: [],
   characters: [],
+  charactersFightId: null,
   selectedFight: null,
   selectedCharacter: null,
   reportResult: null,
@@ -25,6 +26,14 @@ export const useAnalyzeStore = create<AnalyzeState>((set) => ({
   setReportData: ({ reportId, fights, characters }) => set({
     reportId,
     fights,
+    characters,
+    charactersFightId: fights[0]?.id ?? null,
+    isLoading: false,
+    error: null,
+  }),
+
+  setCharactersForFight: (fightId, characters) => set({
+    charactersFightId: fightId,
     characters,
     isLoading: false,
     error: null,

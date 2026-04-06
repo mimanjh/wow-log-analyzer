@@ -4,12 +4,14 @@ export interface AnalyzeState {
   reportId: string | null
   fights: Fight[]
   characters: Character[]
+  charactersFightId: number | null
   selectedFight: Fight | null
   selectedCharacter: Character | null
   reportResult: ReportResult | null
   isLoading: boolean
   error: string | null
   setReportData: (data: { reportId: string | null; fights: Fight[]; characters: Character[] }) => void
+  setCharactersForFight: (fightId: number, characters: Character[]) => void
   setSelectedFight: (fight: Fight | null) => void
   setSelectedCharacter: (character: Character | null) => void
   setReportResult: (result: ReportResult | null) => void

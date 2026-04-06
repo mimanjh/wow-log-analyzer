@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -62,6 +63,41 @@ func (h *Handler) GetFights(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(fights)
+}
+
+func (h *Handler) GetCharacters(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	reportID := strings.TrimPrefix(r.URL.Path, "/reports/")
+	reportID = strings.TrimSuffix(reportID, "/characters")
+	if reportID == "" {
+		http.Error(w, "Report ID is required", http.StatusBadRequest)
+		return
+	}
+
+	fightIDParam := r.URL.Query().Get("fightId")
+	if fightIDParam == "" {
+		http.Error(w, "fightId is required", http.StatusBadRequest)
+		return
+	}
+
+	var fightID int
+	if _, err := fmt.Sscanf(fightIDParam, "%d", &fightID); err != nil || fightID == 0 {
+		http.Error(w, "fightId must be a valid integer", http.StatusBadRequest)
+		return
+	}
+
+	characters, err := h.logService.GetCharacters(reportID, fightID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(characters)
 }
 
 func (h *Handler) GetComparisonData(w http.ResponseWriter, r *http.Request) {

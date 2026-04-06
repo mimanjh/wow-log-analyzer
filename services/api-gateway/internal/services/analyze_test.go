@@ -14,7 +14,7 @@ func (s *stubLogClient) GetFights(string) ([]FightSummary, error) {
 	return s.fights, s.err
 }
 
-func (s *stubLogClient) GetCharacters(string) ([]CharacterSummary, error) {
+func (s *stubLogClient) GetCharacters(string, int) ([]CharacterSummary, error) {
 	return s.characters, s.err
 }
 
@@ -22,9 +22,9 @@ func TestAnalyzeService_ValidateAndParseUrl(t *testing.T) {
 	service := NewAnalyzeService("http://example.com")
 
 	tests := []struct {
-		name     string
-		url      string
-		want     UrlValidationResult
+		name string
+		url  string
+		want UrlValidationResult
 	}{
 		{
 			name: "valid URL",

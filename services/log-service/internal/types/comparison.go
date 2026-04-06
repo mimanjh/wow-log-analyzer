@@ -14,6 +14,14 @@ type ComparisonDataResponse struct {
 	CohortData []PlayerFightData `json:"cohortData"`
 }
 
+type CharacterOption struct {
+	ID    int    `json:"id"`
+	Name  string `json:"name"`
+	Class string `json:"class"`
+	Spec  string `json:"spec"`
+	Role  string `json:"role"`
+}
+
 type Ability struct {
 	ID        int    `json:"id"`
 	Name      string `json:"name"`

@@ -15,6 +15,8 @@ func RegisterRoutes(mux *http.ServeMux, logService *service.LogService) {
 	mux.HandleFunc("/reports/", func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/comparison-data") {
 			handler.GetComparisonData(w, r)
+		} else if strings.HasSuffix(r.URL.Path, "/characters") {
+			handler.GetCharacters(w, r)
 		} else if strings.HasSuffix(r.URL.Path, "/fights") {
 			handler.GetFights(w, r)
 		} else {

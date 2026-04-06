@@ -55,7 +55,7 @@ type LogServiceClient struct {
 
 type logDataClient interface {
 	GetFights(reportID string) ([]FightSummary, error)
-	GetCharacters(reportID string) ([]CharacterSummary, error)
+	GetCharacters(reportID string, fightID int) ([]CharacterSummary, error)
 }
 
 func NewLogServiceClient(baseURL string) *LogServiceClient {
@@ -110,25 +110,25 @@ func (c *LogServiceClient) GetFights(reportID string) ([]FightSummary, error) {
 	return fights, nil
 }
 
-func (c *LogServiceClient) GetCharacters(reportID string) ([]CharacterSummary, error) {
-	// TODO: Implement when log-service has character endpoint
-	// For now, return placeholder characters
-	return []CharacterSummary{
-		{
-			ID:    1,
-			Name:  "Placeholder Character 1",
-			Class: "Warrior",
-			Spec:  "Arms",
-			Role:  "DPS",
-		},
-		{
-			ID:    2,
-			Name:  "Placeholder Character 2",
-			Class: "Priest",
-			Spec:  "Holy",
-			Role:  "Healer",
-		},
-	}, nil
+func (c *LogServiceClient) GetCharacters(reportID string, fightID int) ([]CharacterSummary, error) {
+	url := fmt.Sprintf("%s/reports/%s/characters?fightId=%d", c.baseURL, reportID, fightID)
+	resp, err := c.httpClient.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to call log-service characters endpoint: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("log-service returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var characters []CharacterSummary
+	if err := json.NewDecoder(resp.Body).Decode(&characters); err != nil {
+		return nil, fmt.Errorf("failed to decode characters response: %w", err)
+	}
+
+	return characters, nil
 }
 
 type AnalyzeService struct {
@@ -200,11 +200,13 @@ func (s *AnalyzeService) ProcessIntake(req AnalyzeIntakeRequest) (AnalyzeIntakeR
 		return AnalyzeIntakeResponse{}, fmt.Errorf("failed to retrieve fights: %w", err)
 	}
 
-	// Call log-service to get characters
-	characters, err := s.logClient.GetCharacters(validation.ReportID)
-	if err != nil {
-		log.Printf("Failed to get characters from log-service: %v", err)
-		return AnalyzeIntakeResponse{}, fmt.Errorf("failed to retrieve characters: %w", err)
+	characters := []CharacterSummary{}
+	if len(fights) > 0 {
+		characters, err = s.logClient.GetCharacters(validation.ReportID, fights[0].ID)
+		if err != nil {
+			log.Printf("Failed to get characters from log-service: %v", err)
+			return AnalyzeIntakeResponse{}, fmt.Errorf("failed to retrieve characters: %w", err)
+		}
 	}
 
 	return AnalyzeIntakeResponse{
@@ -212,4 +214,21 @@ func (s *AnalyzeService) ProcessIntake(req AnalyzeIntakeRequest) (AnalyzeIntakeR
 		Fights:     fights,
 		Characters: characters,
 	}, nil
+}
+
+func (s *AnalyzeService) GetCharactersForFight(reportID string, fightID int) ([]CharacterSummary, error) {
+	if strings.TrimSpace(reportID) == "" {
+		return nil, fmt.Errorf("reportId is required")
+	}
+	if fightID == 0 {
+		return nil, fmt.Errorf("fightId is required")
+	}
+
+	characters, err := s.logClient.GetCharacters(reportID, fightID)
+	if err != nil {
+		log.Printf("Failed to get characters from log-service: %v", err)
+		return nil, fmt.Errorf("failed to retrieve characters: %w", err)
+	}
+
+	return characters, nil
 }
