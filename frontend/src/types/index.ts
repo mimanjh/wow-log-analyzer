@@ -107,13 +107,29 @@ export interface ComparisonResult {
   cohortStats: CohortStatistics
   deltas: MetricDeltas
   rankings: MetricRankings
+  abilityUsage: AbilityUsageComparison[]
+  buffUptimes: BuffUptimeComparison[]
 }
 
 export interface ReportResult {
   fight: Fight
   character: Character
+  cohort: CohortEntry[]
   comparison: ComparisonResult
   ai: AISection
+}
+
+export interface CohortEntry {
+  name: string
+  class: string
+  spec: string
+  server?: string
+  serverRegion?: string
+  reportId: string
+  fightId: number
+  rankValue: number
+  durationMs: number
+  reportUrl: string
 }
 
 export interface ReportJob {
@@ -204,7 +220,6 @@ export interface MetricDelta {
   playerValue: number
   cohortValue: number
   difference: number
-  percentile: number
   confidence: string
   caution?: string
 }
@@ -252,6 +267,37 @@ export interface DowntimePercentageMetric {
   value: number
   totalDowntime: number
   fightDuration: number
+  confidence: string
+  caution?: string
+}
+
+export interface AbilityUsageComparison {
+  abilityId: number
+  abilityName: string
+  playerCount: number
+  playerCastsPerMinute: number
+  playerFirstUseSeconds?: number
+  cohortMedianCount: number
+  cohortMedianPerMinute: number
+  cohortMedianFirstUseSeconds?: number
+  countDelta: number
+  perMinuteDelta: number
+  firstUseDeltaSeconds?: number
+  sampleSize: number
+  confidence: string
+  caution?: string
+}
+
+export interface BuffUptimeComparison {
+  abilityId: number
+  abilityName: string
+  playerUptimePct: number
+  playerFirstApplySeconds?: number
+  cohortMedianUptimePct: number
+  cohortMedianFirstApplySeconds?: number
+  uptimeDelta: number
+  firstApplyDeltaSeconds?: number
+  sampleSize: number
   confidence: string
   caution?: string
 }

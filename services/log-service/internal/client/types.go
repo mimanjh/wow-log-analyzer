@@ -37,6 +37,11 @@ type WCLActor struct {
 	Type     string  `json:"type"`
 }
 
+type WCLAbility struct {
+	GameID int    `json:"gameID"`
+	Name   string `json:"name"`
+}
+
 type WCLPlayerSpec struct {
 	Spec string `json:"spec"`
 }

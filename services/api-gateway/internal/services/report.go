@@ -22,8 +22,22 @@ type GenerateReportRequest struct {
 type GenerateReportResponse struct {
 	Fight      FightSummary     `json:"fight"`
 	Character  CharacterSummary `json:"character"`
+	Cohort     []CohortEntry    `json:"cohort"`
 	Comparison ComparisonResult `json:"comparison"`
 	AI         AIReportSection  `json:"ai"`
+}
+
+type CohortEntry struct {
+	Name         string  `json:"name"`
+	Class        string  `json:"class"`
+	Spec         string  `json:"spec"`
+	Server       string  `json:"server,omitempty"`
+	ServerRegion string  `json:"serverRegion,omitempty"`
+	ReportID     string  `json:"reportId"`
+	FightID      int     `json:"fightId"`
+	RankValue    float64 `json:"rankValue"`
+	DurationMS   int     `json:"durationMs"`
+	ReportURL    string  `json:"reportUrl"`
 }
 
 type AIReportSection struct {
@@ -40,6 +54,8 @@ type ComparisonResult struct {
 	CohortStats   CohortStatistics   `json:"cohortStats"`
 	Deltas        MetricDeltas       `json:"deltas"`
 	Rankings      MetricRankings     `json:"rankings"`
+	AbilityUsage  []AbilityUsageComparison `json:"abilityUsage"`
+	BuffUptimes   []BuffUptimeComparison   `json:"buffUptimes"`
 }
 
 type PlayerFightMetrics struct {
@@ -137,6 +153,39 @@ type MetricRankings struct {
 	MajorCDDrift float64 `json:"majorCdDrift"`
 	BuffUptime   float64 `json:"buffUptime"`
 	DowntimePct  float64 `json:"downtimePct"`
+}
+
+type AbilityUsageComparison struct {
+	AbilityID               int     `json:"abilityId"`
+	AbilityName             string  `json:"abilityName"`
+	PlayerCount             int     `json:"playerCount"`
+	PlayerCastsPerMinute    float64 `json:"playerCastsPerMinute"`
+	PlayerFirstUseSeconds   float64 `json:"playerFirstUseSeconds,omitempty"`
+	CohortMedianCount       float64 `json:"cohortMedianCount"`
+	CohortMedianPerMinute   float64 `json:"cohortMedianPerMinute"`
+	CohortMedianFirstUseSec float64 `json:"cohortMedianFirstUseSeconds,omitempty"`
+	CountDelta              float64 `json:"countDelta"`
+	PerMinuteDelta          float64 `json:"perMinuteDelta"`
+	FirstUseDeltaSeconds    float64 `json:"firstUseDeltaSeconds,omitempty"`
+	Percentile              float64 `json:"percentile"`
+	SampleSize              int     `json:"sampleSize"`
+	Confidence              string  `json:"confidence"`
+	Caution                 string  `json:"caution,omitempty"`
+}
+
+type BuffUptimeComparison struct {
+	AbilityID               int     `json:"abilityId"`
+	AbilityName             string  `json:"abilityName"`
+	PlayerUptimePct         float64 `json:"playerUptimePct"`
+	PlayerFirstApplySeconds float64 `json:"playerFirstApplySeconds,omitempty"`
+	CohortMedianUptimePct   float64 `json:"cohortMedianUptimePct"`
+	CohortMedianFirstApply  float64 `json:"cohortMedianFirstApplySeconds,omitempty"`
+	UptimeDelta             float64 `json:"uptimeDelta"`
+	FirstApplyDeltaSeconds  float64 `json:"firstApplyDeltaSeconds,omitempty"`
+	Percentile              float64 `json:"percentile"`
+	SampleSize              int     `json:"sampleSize"`
+	Confidence              string  `json:"confidence"`
+	Caution                 string  `json:"caution,omitempty"`
 }
 
 type logComparisonRequest struct {
@@ -340,6 +389,7 @@ func (s *ReportService) runJob(jobID string, req GenerateReportRequest) {
 	}
 
 	cohortData := make([]json.RawMessage, 0, len(candidates))
+	cohortEntries := make([]CohortEntry, 0, len(candidates))
 	for index, candidate := range candidates {
 		s.updateJob(jobID, ReportJobRunning, "cohort", fmt.Sprintf("Fetching cohort member %d of %d.", index+1, len(candidates)), ReportJobProgress{Current: index + 1, Total: len(candidates)}, "", nil)
 		memberData, err := s.fetchCohortMember(ctx, candidate)
@@ -347,6 +397,7 @@ func (s *ReportService) runJob(jobID string, req GenerateReportRequest) {
 			continue
 		}
 		cohortData = append(cohortData, memberData)
+		cohortEntries = append(cohortEntries, buildCohortEntry(candidate))
 	}
 	if len(cohortData) == 0 {
 		s.updateJob(jobID, ReportJobFailed, "cohort", "Failed to collect any cohort members.", ReportJobProgress{Current: len(candidates), Total: len(candidates)}, "no cohort member data could be fetched", nil)
@@ -363,6 +414,7 @@ func (s *ReportService) runJob(jobID string, req GenerateReportRequest) {
 	response := GenerateReportResponse{
 		Fight:      req.Fight,
 		Character:  req.Character,
+		Cohort:     cohortEntries,
 		Comparison: comparison,
 		AI: AIReportSection{
 			Available: false,
@@ -390,6 +442,25 @@ func (s *ReportService) runJob(jobID string, req GenerateReportRequest) {
 	}
 
 	s.updateJob(jobID, ReportJobCompleted, "completed", "Report completed.", ReportJobProgress{Current: 5, Total: 5}, "", &response)
+}
+
+func buildCohortEntry(candidate RankingCandidate) CohortEntry {
+	return CohortEntry{
+		Name:         candidate.Name,
+		Class:        candidate.Class,
+		Spec:         candidate.Spec,
+		Server:       candidate.Server,
+		ServerRegion: candidate.ServerRegion,
+		ReportID:     candidate.ReportID,
+		FightID:      candidate.FightID,
+		RankValue:    candidate.RankValue,
+		DurationMS:   candidate.DurationMS,
+		ReportURL: fmt.Sprintf(
+			"https://www.warcraftlogs.com/reports/%s#fight=%d",
+			candidate.ReportID,
+			candidate.FightID,
+		),
+	}
 }
 
 func (s *ReportService) setJob(job ReportJob) {

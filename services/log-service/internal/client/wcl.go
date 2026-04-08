@@ -223,8 +223,10 @@ func (c *WCLHTTPClient) GetRankingCandidates(fight types.FightSelection, charact
 		capacity = len(rankings)
 	}
 	candidates := make([]types.RankingCandidate, 0, capacity)
+	fallbackCandidates := make([]types.RankingCandidate, 0, capacity)
+	targetDurationMS := fight.KillTime * 1000
 	for _, ranking := range rankings {
-		candidates = append(candidates, types.RankingCandidate{
+		candidate := types.RankingCandidate{
 			Name:         ranking.Name,
 			Class:        normalizeClass(ranking.Class),
 			Spec:         normalizeSpec(ranking.Spec),
@@ -234,10 +236,22 @@ func (c *WCLHTTPClient) GetRankingCandidates(fight types.FightSelection, charact
 			FightID:      ranking.Report.FightID,
 			RankValue:    ranking.Amount,
 			DurationMS:   ranking.Duration,
-		})
+		}
+		if isSimilarFightDuration(targetDurationMS, ranking.Duration) {
+			candidates = append(candidates, candidate)
+		} else {
+			fallbackCandidates = append(fallbackCandidates, candidate)
+		}
 		if len(candidates) == limit {
 			break
 		}
+	}
+
+	for _, candidate := range fallbackCandidates {
+		if len(candidates) == limit {
+			break
+		}
+		candidates = append(candidates, candidate)
 	}
 
 	return candidates, nil
@@ -825,6 +839,48 @@ func (c *WCLHTTPClient) getPlayerActors(reportID string) ([]WCLActor, error) {
 	return actors, nil
 }
 
+func (c *WCLHTTPClient) getReportAbilityNames(reportID string) (map[int]string, error) {
+	query := fmt.Sprintf(`
+		query {
+			reportData {
+				report(code: "%s") {
+					masterData {
+						abilities {
+							gameID
+							name
+						}
+					}
+				}
+			}
+		}`, reportID)
+
+	var response struct {
+		Data struct {
+			ReportData struct {
+				Report struct {
+					MasterData struct {
+						Abilities []WCLAbility `json:"abilities"`
+					} `json:"masterData"`
+				} `json:"report"`
+			} `json:"reportData"`
+		} `json:"data"`
+	}
+
+	if err := c.makeGraphQLRequest(query, &response); err != nil {
+		return nil, fmt.Errorf("failed to fetch report abilities: %w", err)
+	}
+
+	abilityNames := make(map[int]string, len(response.Data.ReportData.Report.MasterData.Abilities))
+	for _, ability := range response.Data.ReportData.Report.MasterData.Abilities {
+		if ability.GameID == 0 || strings.TrimSpace(ability.Name) == "" {
+			continue
+		}
+		abilityNames[ability.GameID] = ability.Name
+	}
+
+	return abilityNames, nil
+}
+
 func (c *WCLHTTPClient) getFightCharacters(reportID string, fightID int) ([]types.CharacterOption, error) {
 	actors, err := c.getPlayerActors(reportID)
 	if err != nil {
@@ -882,6 +938,11 @@ func (c *WCLHTTPClient) getFightCharacters(reportID string, fightID int) ([]type
 }
 
 func (c *WCLHTTPClient) fetchPlayerFightData(reportID string, fight types.NormalizedFight, actorID int) (types.PlayerFightData, error) {
+	abilityNames, err := c.getReportAbilityNames(reportID)
+	if err != nil {
+		return types.PlayerFightData{}, err
+	}
+
 	castRaw, err := c.fetchEvents(reportID, "Casts", fight.ID, actorID)
 	if err != nil {
 		return types.PlayerFightData{}, err
@@ -904,11 +965,11 @@ func (c *WCLHTTPClient) fetchPlayerFightData(reportID string, fight types.Normal
 		FightID:        fight.ID,
 		FightStart:     fight.StartTime,
 		FightEnd:       fight.EndTime,
-		CastEvents:     normalizeCastEvents(castRaw),
-		DamageEvents:   normalizeDamageEvents(damageRaw),
-		HealEvents:     normalizeHealEvents(healRaw),
-		BuffEvents:     normalizeBuffEvents(buffRaw),
-		CooldownEvents: normalizeCooldownEvents(castRaw),
+		CastEvents:     normalizeCastEvents(castRaw, abilityNames),
+		DamageEvents:   normalizeDamageEvents(damageRaw, abilityNames),
+		HealEvents:     normalizeHealEvents(healRaw, abilityNames),
+		BuffEvents:     normalizeBuffEvents(buffRaw, abilityNames),
+		CooldownEvents: normalizeCooldownEvents(castRaw, abilityNames),
 	}, nil
 }
 
@@ -1057,24 +1118,24 @@ func matchRankingToCharacter(characters []types.CharacterOption, ranking WCLRank
 	return types.CharacterOption{}, false
 }
 
-func normalizeCastEvents(raw []map[string]interface{}) []types.CastEvent {
+func normalizeCastEvents(raw []map[string]interface{}, abilityNames map[int]string) []types.CastEvent {
 	events := make([]types.CastEvent, 0, len(raw))
 	for _, event := range raw {
 		events = append(events, types.CastEvent{
 			Timestamp: parseTimestamp(event["timestamp"]),
-			Ability:   parseAbility(event),
+			Ability:   parseAbility(event, abilityNames),
 			SourceID:  parseActorID(event, "sourceID", "source"),
 		})
 	}
 	return events
 }
 
-func normalizeDamageEvents(raw []map[string]interface{}) []types.DamageEvent {
+func normalizeDamageEvents(raw []map[string]interface{}, abilityNames map[int]string) []types.DamageEvent {
 	events := make([]types.DamageEvent, 0, len(raw))
 	for _, event := range raw {
 		events = append(events, types.DamageEvent{
 			Timestamp: parseTimestamp(event["timestamp"]),
-			Ability:   parseAbility(event),
+			Ability:   parseAbility(event, abilityNames),
 			SourceID:  parseActorID(event, "sourceID", "source"),
 			TargetID:  parseActorID(event, "targetID", "target"),
 			Amount:    parseInt(event["amount"]),
@@ -1083,12 +1144,12 @@ func normalizeDamageEvents(raw []map[string]interface{}) []types.DamageEvent {
 	return events
 }
 
-func normalizeHealEvents(raw []map[string]interface{}) []types.HealEvent {
+func normalizeHealEvents(raw []map[string]interface{}, abilityNames map[int]string) []types.HealEvent {
 	events := make([]types.HealEvent, 0, len(raw))
 	for _, event := range raw {
 		events = append(events, types.HealEvent{
 			Timestamp: parseTimestamp(event["timestamp"]),
-			Ability:   parseAbility(event),
+			Ability:   parseAbility(event, abilityNames),
 			SourceID:  parseActorID(event, "sourceID", "source"),
 			TargetID:  parseActorID(event, "targetID", "target"),
 			Amount:    parseInt(event["amount"]),
@@ -1097,7 +1158,7 @@ func normalizeHealEvents(raw []map[string]interface{}) []types.HealEvent {
 	return events
 }
 
-func normalizeBuffEvents(raw []map[string]interface{}) []types.BuffEvent {
+func normalizeBuffEvents(raw []map[string]interface{}, abilityNames map[int]string) []types.BuffEvent {
 	events := make([]types.BuffEvent, 0, len(raw))
 	for _, event := range raw {
 		eventType := fmt.Sprintf("%v", event["type"])
@@ -1113,7 +1174,7 @@ func normalizeBuffEvents(raw []map[string]interface{}) []types.BuffEvent {
 			continue
 		}
 
-		ability := parseAbility(event)
+		ability := parseAbility(event, abilityNames)
 		ability.IsBuff = true
 		events = append(events, types.BuffEvent{
 			Timestamp: parseTimestamp(event["timestamp"]),
@@ -1126,12 +1187,12 @@ func normalizeBuffEvents(raw []map[string]interface{}) []types.BuffEvent {
 	return events
 }
 
-func normalizeCooldownEvents(raw []map[string]interface{}) []types.CooldownEvent {
+func normalizeCooldownEvents(raw []map[string]interface{}, abilityNames map[int]string) []types.CooldownEvent {
 	events := make([]types.CooldownEvent, 0)
 	seen := map[int]int{}
 
 	for _, event := range raw {
-		ability := parseAbility(event)
+		ability := parseAbility(event, abilityNames)
 		if ability.ID == 0 {
 			continue
 		}
@@ -1139,7 +1200,7 @@ func normalizeCooldownEvents(raw []map[string]interface{}) []types.CooldownEvent
 	}
 
 	for _, event := range raw {
-		ability := parseAbility(event)
+		ability := parseAbility(event, abilityNames)
 		if ability.ID == 0 || seen[ability.ID] > 5 {
 			continue
 		}
@@ -1163,7 +1224,7 @@ func parseTimestamp(value interface{}) time.Time {
 	return time.UnixMilli(ms)
 }
 
-func parseAbility(event map[string]interface{}) types.Ability {
+func parseAbility(event map[string]interface{}, abilityNames map[int]string) types.Ability {
 	if abilityValue, ok := event["ability"]; ok {
 		if abilityMap, ok := abilityValue.(map[string]interface{}); ok {
 			return types.Ability{
@@ -1173,9 +1234,15 @@ func parseAbility(event map[string]interface{}) types.Ability {
 		}
 	}
 
+	abilityID := parseInt(event["abilityGameID"])
+	abilityName := parseString(event["abilityName"])
+	if abilityName == "" && abilityID != 0 {
+		abilityName = abilityNames[abilityID]
+	}
+
 	return types.Ability{
-		ID:   parseInt(event["abilityGameID"]),
-		Name: parseString(event["abilityName"]),
+		ID:   abilityID,
+		Name: abilityName,
 	}
 }
 
@@ -1255,6 +1322,24 @@ func rankingDifficultyID(name string) int {
 	default:
 		return 0
 	}
+}
+
+func isSimilarFightDuration(targetMS, candidateMS int) bool {
+	if targetMS <= 0 || candidateMS <= 0 {
+		return true
+	}
+
+	allowedDifference := int(float64(targetMS) * 0.15)
+	if allowedDifference < 15000 {
+		allowedDifference = 15000
+	}
+
+	difference := targetMS - candidateMS
+	if difference < 0 {
+		difference = -difference
+	}
+
+	return difference <= allowedDifference
 }
 
 func normalizedFightFromSelection(selection types.FightSelection) types.NormalizedFight {

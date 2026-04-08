@@ -22,6 +22,8 @@ type ComparisonResult struct {
 	CohortStats   CohortStatistics       `json:"cohortStats"`
 	Deltas        MetricDeltas           `json:"deltas"`
 	Rankings      MetricRankings         `json:"rankings"`
+	AbilityUsage  []AbilityUsageComparison `json:"abilityUsage"`
+	BuffUptimes   []BuffUptimeComparison   `json:"buffUptimes"`
 }
 
 // CohortStatistics contains aggregated statistics for the comparison cohort
@@ -72,4 +74,37 @@ type MetricRankings struct {
 	MajorCDDrift float64 `json:"majorCdDrift"`
 	BuffUptime   float64 `json:"buffUptime"`
 	DowntimePct  float64 `json:"downtimePct"`
+}
+
+type AbilityUsageComparison struct {
+	AbilityID               int     `json:"abilityId"`
+	AbilityName             string  `json:"abilityName"`
+	PlayerCount             int     `json:"playerCount"`
+	PlayerCastsPerMinute    float64 `json:"playerCastsPerMinute"`
+	PlayerFirstUseSeconds   float64 `json:"playerFirstUseSeconds,omitempty"`
+	CohortMedianCount       float64 `json:"cohortMedianCount"`
+	CohortMedianPerMinute   float64 `json:"cohortMedianPerMinute"`
+	CohortMedianFirstUseSec float64 `json:"cohortMedianFirstUseSeconds,omitempty"`
+	CountDelta              float64 `json:"countDelta"`
+	PerMinuteDelta          float64 `json:"perMinuteDelta"`
+	FirstUseDeltaSeconds    float64 `json:"firstUseDeltaSeconds,omitempty"`
+	Percentile              float64 `json:"percentile"`
+	SampleSize              int     `json:"sampleSize"`
+	Confidence              string  `json:"confidence"`
+	Caution                 string  `json:"caution,omitempty"`
+}
+
+type BuffUptimeComparison struct {
+	AbilityID               int     `json:"abilityId"`
+	AbilityName             string  `json:"abilityName"`
+	PlayerUptimePct         float64 `json:"playerUptimePct"`
+	PlayerFirstApplySeconds float64 `json:"playerFirstApplySeconds,omitempty"`
+	CohortMedianUptimePct   float64 `json:"cohortMedianUptimePct"`
+	CohortMedianFirstApply  float64 `json:"cohortMedianFirstApplySeconds,omitempty"`
+	UptimeDelta             float64 `json:"uptimeDelta"`
+	FirstApplyDeltaSeconds  float64 `json:"firstApplyDeltaSeconds,omitempty"`
+	Percentile              float64 `json:"percentile"`
+	SampleSize              int     `json:"sampleSize"`
+	Confidence              string  `json:"confidence"`
+	Caution                 string  `json:"caution,omitempty"`
 }

@@ -150,3 +150,98 @@ func TestAnalysisService_CompareAgainstCohort(t *testing.T) {
 		t.Errorf("Expected player percentile around 50, got %f", comparison.Deltas.CastsPerMin.Percentile)
 	}
 }
+
+func TestAnalysisService_UsageComparisons(t *testing.T) {
+	service := NewAnalysisService()
+
+	playerData := types.PlayerFightData{
+		PlayerID:   1,
+		FightID:    100,
+		FightStart: time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC),
+		FightEnd:   time.Date(2024, 1, 1, 12, 5, 0, 0, time.UTC),
+		CastEvents: []types.CastEvent{
+			{Timestamp: time.Date(2024, 1, 1, 12, 0, 10, 0, time.UTC), Ability: types.Ability{ID: 1, Name: "Shadowstrike"}, SourceID: 1},
+			{Timestamp: time.Date(2024, 1, 1, 12, 1, 10, 0, time.UTC), Ability: types.Ability{ID: 1, Name: "Shadowstrike"}, SourceID: 1},
+		},
+		BuffEvents: []types.BuffEvent{
+			{Timestamp: time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC), Ability: types.Ability{ID: 2, Name: "Slice and Dice", IsBuff: true}, SourceID: 1, TargetID: 1, EventType: "apply"},
+			{Timestamp: time.Date(2024, 1, 1, 12, 4, 0, 0, time.UTC), Ability: types.Ability{ID: 2, Name: "Slice and Dice", IsBuff: true}, SourceID: 1, TargetID: 1, EventType: "remove"},
+		},
+	}
+
+	cohortData := []types.PlayerFightData{
+		{
+			PlayerID:   2,
+			FightID:    100,
+			FightStart: time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC),
+			FightEnd:   time.Date(2024, 1, 1, 12, 5, 0, 0, time.UTC),
+			CastEvents: []types.CastEvent{
+				{Timestamp: time.Date(2024, 1, 1, 12, 0, 5, 0, time.UTC), Ability: types.Ability{ID: 1, Name: "Shadowstrike"}, SourceID: 2},
+				{Timestamp: time.Date(2024, 1, 1, 12, 0, 45, 0, time.UTC), Ability: types.Ability{ID: 1, Name: "Shadowstrike"}, SourceID: 2},
+				{Timestamp: time.Date(2024, 1, 1, 12, 1, 25, 0, time.UTC), Ability: types.Ability{ID: 1, Name: "Shadowstrike"}, SourceID: 2},
+			},
+			BuffEvents: []types.BuffEvent{
+				{Timestamp: time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC), Ability: types.Ability{ID: 2, Name: "Slice and Dice", IsBuff: true}, SourceID: 2, TargetID: 2, EventType: "apply"},
+				{Timestamp: time.Date(2024, 1, 1, 12, 5, 0, 0, time.UTC), Ability: types.Ability{ID: 2, Name: "Slice and Dice", IsBuff: true}, SourceID: 2, TargetID: 2, EventType: "remove"},
+			},
+		},
+	}
+
+	abilityComparisons := service.CalculateAbilityUsageComparisons(playerData, cohortData)
+	if len(abilityComparisons) == 0 {
+		t.Fatalf("expected ability comparisons to be populated")
+	}
+	if abilityComparisons[0].AbilityName != "Shadowstrike" {
+		t.Fatalf("expected Shadowstrike comparison, got %s", abilityComparisons[0].AbilityName)
+	}
+	if abilityComparisons[0].PlayerCount != 2 {
+		t.Fatalf("expected player cast count 2, got %d", abilityComparisons[0].PlayerCount)
+	}
+
+	buffComparisons := service.CalculateBuffUptimeComparisons(playerData, cohortData)
+	if len(buffComparisons) == 0 {
+		t.Fatalf("expected buff comparisons to be populated")
+	}
+	if buffComparisons[0].AbilityName != "Slice and Dice" {
+		t.Fatalf("expected Slice and Dice comparison, got %s", buffComparisons[0].AbilityName)
+	}
+	if buffComparisons[0].PlayerUptimePct <= 0 {
+		t.Fatalf("expected positive player uptime, got %f", buffComparisons[0].PlayerUptimePct)
+	}
+}
+
+func TestAnalysisService_BuffUptimeComparisonClampsInvalidTimestamps(t *testing.T) {
+	service := NewAnalysisService()
+
+	playerData := types.PlayerFightData{
+		PlayerID:   1,
+		FightID:    100,
+		FightStart: time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC),
+		FightEnd:   time.Date(2024, 1, 1, 12, 3, 0, 0, time.UTC),
+		BuffEvents: []types.BuffEvent{
+			{Timestamp: time.Time{}, Ability: types.Ability{ID: 2, Name: "Slice and Dice", IsBuff: true}, SourceID: 1, TargetID: 1, EventType: "apply"},
+			{Timestamp: time.Date(2024, 1, 1, 12, 2, 0, 0, time.UTC), Ability: types.Ability{ID: 2, Name: "Slice and Dice", IsBuff: true}, SourceID: 1, TargetID: 1, EventType: "remove"},
+		},
+	}
+
+	cohortData := []types.PlayerFightData{
+		{
+			PlayerID:   2,
+			FightID:    100,
+			FightStart: time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC),
+			FightEnd:   time.Date(2024, 1, 1, 12, 3, 0, 0, time.UTC),
+			BuffEvents: []types.BuffEvent{
+				{Timestamp: time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC), Ability: types.Ability{ID: 2, Name: "Slice and Dice", IsBuff: true}, SourceID: 2, TargetID: 2, EventType: "apply"},
+				{Timestamp: time.Date(2024, 1, 1, 12, 3, 0, 0, time.UTC), Ability: types.Ability{ID: 2, Name: "Slice and Dice", IsBuff: true}, SourceID: 2, TargetID: 2, EventType: "remove"},
+			},
+		},
+	}
+
+	buffComparisons := service.CalculateBuffUptimeComparisons(playerData, cohortData)
+	if len(buffComparisons) == 0 {
+		t.Fatalf("expected buff comparisons to be populated")
+	}
+	if buffComparisons[0].PlayerUptimePct > 100 {
+		t.Fatalf("expected clamped uptime <= 100, got %f", buffComparisons[0].PlayerUptimePct)
+	}
+}

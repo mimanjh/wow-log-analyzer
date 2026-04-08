@@ -4,7 +4,6 @@ interface MetricCardProps {
     playerValue: number;
     cohortValue: number;
     delta: number;
-    percentile: number;
     confidence: "high" | "medium" | "low";
     caution?: string;
     unit?: string;
@@ -16,7 +15,6 @@ export function MetricCard({
     playerValue,
     cohortValue,
     delta,
-    percentile,
     confidence,
     caution,
     unit = "",
@@ -32,13 +30,6 @@ export function MetricCard({
             default:
                 return "text-slate-400";
         }
-    };
-
-    const getPercentileColor = (metricPercentile: number) => {
-        if (metricPercentile >= 75) return "text-emerald-400";
-        if (metricPercentile >= 50) return "text-amber-400";
-        if (metricPercentile >= 25) return "text-orange-400";
-        return "text-rose-400";
     };
 
     const formatValue = (value: number) => {
@@ -74,7 +65,7 @@ export function MetricCard({
                     </p>
                 </div>
                 <div className="text-center">
-                    <p className="text-sm text-slate-400">Cohort</p>
+                    <p className="text-sm text-slate-400">Elites</p>
                     <p className="mt-1 text-xl font-semibold text-slate-300">
                         {formatValue(cohortValue)}
                         {unit}
@@ -98,20 +89,10 @@ export function MetricCard({
                 </div>
             </div>
 
-            <div className="mt-4 flex items-center justify-between gap-4">
-                <div className="flex items-center space-x-2">
-                    <span className="text-sm text-slate-400">Percentile:</span>
-                    <span
-                        className={`text-sm font-semibold ${getPercentileColor(percentile)}`}
-                    >
-                        {percentile.toFixed(1)}th
-                    </span>
-                </div>
+            <div className="mt-4 flex items-center justify-end gap-4">
                 {caution && (
                     <div className="flex items-center space-x-1">
-                        <span className="text-xs text-amber-400">
-                            Caution:
-                        </span>
+                        <span className="text-xs text-amber-400">Caution:</span>
                         <span className="text-xs text-amber-400">
                             {caution}
                         </span>

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAnalyzeStore } from "../stores/useAnalyzeStore";
 import { usePageTitle } from "../hooks/usePageTitle";
@@ -16,17 +16,675 @@ const reportStages = [
     { key: "completed", label: "Complete" },
 ] as const;
 
+const trackedSpecPriorities: Record<
+    string,
+    { abilities: string[]; buffs: string[] }
+> = {
+    "Blood Death Knight": {
+        abilities: [
+            "Dancing Rune Weapon",
+            "Vampiric Blood",
+            "Anti-Magic Zone",
+            "Icebound Fortitude",
+            "Lichborne",
+            "Anti-Magic Shell",
+        ],
+        buffs: [
+            "Dancing Rune Weapon",
+            "Vampiric Blood",
+            "Anti-Magic Zone",
+            "Icebound Fortitude",
+            "Lichborne",
+            "Anti-Magic Shell",
+        ],
+    },
+    "Vengeance Demon Hunter": {
+        abilities: [
+            "Fiery Brand",
+            "Immolation Aura",
+            "Fel Devastation",
+            "Sigil of Flame",
+            "Darkness",
+            "Demon Spikes",
+        ],
+        buffs: [
+            "Fiery Brand",
+            "Immolation Aura",
+            "Fel Devastation",
+            "Sigil of Flame",
+            "Darkness",
+            "Demon Spikes",
+        ],
+    },
+    "Guardian Druid": {
+        abilities: [
+            "Incarnation: Guardian of Ursoc",
+            "Convoke the Spirits",
+            "Lunar Beam",
+            "Barkskin",
+            "Survival Instincts",
+            "Frenzied Regeneration",
+        ],
+        buffs: [
+            "Incarnation: Guardian of Ursoc",
+            "Convoke the Spirits",
+            "Lunar Beam",
+            "Barkskin",
+            "Survival Instincts",
+            "Frenzied Regeneration",
+        ],
+    },
+    "Brewmaster Monk": {
+        abilities: [
+            "Invoke Niuzao, the Black Ox",
+            "Exploding Keg",
+            "Celestial Infusion",
+            "Touch of Death",
+            "Fortifying Brew",
+        ],
+        buffs: [
+            "Invoke Niuzao, the Black Ox",
+            "Exploding Keg",
+            "Celestial Infusion",
+            "Touch of Death",
+            "Fortifying Brew",
+        ],
+    },
+    "Protection Paladin": {
+        abilities: [
+            "Avenging Wrath",
+            "Divine Toll",
+            "Ardent Defender",
+            "Guardian of Ancient Kings",
+            "Divine Shield",
+        ],
+        buffs: [
+            "Avenging Wrath",
+            "Divine Toll",
+            "Ardent Defender",
+            "Guardian of Ancient Kings",
+            "Divine Shield",
+        ],
+    },
+    "Protection Warrior": {
+        abilities: [
+            "Avatar",
+            "Ravager",
+            "Thunder Blast",
+            "Shield Charge",
+            "Rend",
+            "Shield Wall",
+            "Demoralizing Shout",
+            "Spell Reflection",
+            "Rallying Cry",
+        ],
+        buffs: [
+            "Avatar",
+            "Ravager",
+            "Thunder Blast",
+            "Shield Charge",
+            "Rend",
+            "Shield Wall",
+            "Demoralizing Shout",
+            "Spell Reflection",
+            "Rallying Cry",
+        ],
+    },
+    "Frost Death Knight": {
+        abilities: [
+            "Pillar of Frost",
+            "Frostwyrm's Fury",
+            "Breath of Sindragosa",
+            "Icebound Fortitude",
+            "Lichborne",
+            "Anti-Magic Shell",
+        ],
+        buffs: [
+            "Pillar of Frost",
+            "Frostwyrm's Fury",
+            "Breath of Sindragosa",
+            "Icebound Fortitude",
+            "Lichborne",
+            "Anti-Magic Shell",
+        ],
+    },
+    "Unholy Death Knight": {
+        abilities: [
+            "Army of the Dead",
+            "Raise Abomination",
+            "Dark Transformation",
+            "Putrefy",
+            "Soul Reaper",
+            "Icebound Fortitude",
+            "Lichborne",
+            "Anti-Magic Shell",
+        ],
+        buffs: [
+            "Army of the Dead",
+            "Raise Abomination",
+            "Dark Transformation",
+            "Putrefy",
+            "Soul Reaper",
+            "Icebound Fortitude",
+            "Lichborne",
+            "Anti-Magic Shell",
+        ],
+    },
+    "Havoc Demon Hunter": {
+        abilities: [
+            "Metamorphosis",
+            "Eye Beam",
+            "Essence Break",
+            "The Hunt",
+            "Darkness",
+        ],
+        buffs: [
+            "Metamorphosis",
+            "Eye Beam",
+            "Essence Break",
+            "The Hunt",
+            "Darkness",
+        ],
+    },
+    "Feral Druid": {
+        abilities: [
+            "Berserk",
+            "Tiger's Fury",
+            "Feral Frenzy",
+            "Convoke the Spirits",
+            "Barkskin",
+            "Survival Instincts",
+            "Frenzied Regeneration",
+        ],
+        buffs: [
+            "Berserk",
+            "Tiger's Fury",
+            "Feral Frenzy",
+            "Convoke the Spirits",
+            "Barkskin",
+            "Survival Instincts",
+            "Frenzied Regeneration",
+        ],
+    },
+    "Survival Hunter": {
+        abilities: [
+            "Aspect of the Eagle",
+            "Takedown",
+            "Boomstick",
+            "Exhilaration",
+            "Survival of the Fittest",
+            "Aspect of the Turtle",
+        ],
+        buffs: [
+            "Aspect of the Eagle",
+            "Takedown",
+            "Boomstick",
+            "Exhilaration",
+            "Survival of the Fittest",
+            "Aspect of the Turtle",
+        ],
+    },
+    "Windwalker Monk": {
+        abilities: [
+            "Zenith",
+            "Touch of Death",
+            "Touch of Karma",
+            "Fortifying Brew",
+        ],
+        buffs: [
+            "Zenith",
+            "Touch of Death",
+            "Touch of Karma",
+            "Fortifying Brew",
+        ],
+    },
+    "Retribution Paladin": {
+        abilities: [
+            "Avenging Wrath",
+            "Divine Toll",
+            "Wake of Ashes",
+            "Execution Sentence",
+            "Divine Protection",
+            "Divine Shield",
+        ],
+        buffs: [
+            "Avenging Wrath",
+            "Divine Toll",
+            "Wake of Ashes",
+            "Execution Sentence",
+            "Divine Protection",
+            "Divine Shield",
+        ],
+    },
+    "Assassination Rogue": {
+        abilities: [
+            "Kingsbane",
+            "Shiv",
+            "Deathmark",
+            "Vanish",
+            "Feint",
+            "Evasion",
+            "Cloak of Shadows",
+            "Crimson Vial",
+        ],
+        buffs: [
+            "Kingsbane",
+            "Shiv",
+            "Deathmark",
+            "Vanish",
+            "Feint",
+            "Evasion",
+            "Cloak of Shadows",
+            "Crimson Vial",
+        ],
+    },
+    "Outlaw Rogue": {
+        abilities: [
+            "Adrenaline Rush",
+            "Keep It Rolling",
+            "Vanish",
+            "Feint",
+            "Evasion",
+            "Cloak of Shadows",
+            "Crimson Vial",
+        ],
+        buffs: [
+            "Adrenaline Rush",
+            "Keep It Rolling",
+            "Vanish",
+            "Feint",
+            "Evasion",
+            "Cloak of Shadows",
+            "Crimson Vial",
+        ],
+    },
+    "Subtlety Rogue": {
+        abilities: [
+            "Shadow Blades",
+            "Shadow Dance",
+            "Secret Technique",
+            "Vanish",
+            "Feint",
+            "Evasion",
+            "Cloak of Shadows",
+            "Crimson Vial",
+        ],
+        buffs: [
+            "Shadow Blades",
+            "Shadow Dance",
+            "Secret Technique",
+            "Vanish",
+            "Feint",
+            "Evasion",
+            "Cloak of Shadows",
+            "Crimson Vial",
+        ],
+    },
+    "Enhancement Shaman": {
+        abilities: [
+            "Sundering",
+            "Doom Winds",
+            "Primordial Storm",
+            "Astral Shift",
+        ],
+        buffs: ["Sundering", "Doom Winds", "Primordial Storm", "Astral Shift"],
+    },
+    "Arms Warrior": {
+        abilities: [
+            "Colossus Smash",
+            "Ravager",
+            "Avatar",
+            "Bladestorm",
+            "Sweeping Strikes",
+            "Execute",
+            "Rend",
+            "Spell Reflection",
+            "Rallying Cry",
+        ],
+        buffs: [
+            "Colossus Smash",
+            "Ravager",
+            "Avatar",
+            "Bladestorm",
+            "Sweeping Strikes",
+            "Execute",
+            "Rend",
+            "Spell Reflection",
+            "Rallying Cry",
+        ],
+    },
+    "Fury Warrior": {
+        abilities: [
+            "Recklessness",
+            "Avatar",
+            "Odyn's Fury",
+            "Bladestorm",
+            "Rend",
+            "Enraged Regeneration",
+            "Spell Reflection",
+            "Rallying Cry",
+        ],
+        buffs: [
+            "Recklessness",
+            "Avatar",
+            "Odyn's Fury",
+            "Bladestorm",
+            "Rend",
+            "Enraged Regeneration",
+            "Spell Reflection",
+            "Rallying Cry",
+        ],
+    },
+    "Devourer Demon Hunter": {
+        abilities: ["Void Metamorphosis", "Collapsing Star", "Darkness"],
+        buffs: ["Void Metamorphosis", "Collapsing Star", "Darkness"],
+    },
+    "Balance Druid": {
+        abilities: [
+            "Celestial Alignment",
+            "Force of Nature",
+            "Fury of Elune",
+            "Full Moon",
+            "Convoke the Spirits",
+            "Lunar Eclipse",
+            "Solar Eclipse",
+            "Barkskin",
+            "Survival Instincts",
+            "Frenzied Regeneration",
+        ],
+        buffs: [
+            "Celestial Alignment",
+            "Force of Nature",
+            "Fury of Elune",
+            "Full Moon",
+            "Convoke the Spirits",
+            "Lunar Eclipse",
+            "Solar Eclipse",
+            "Barkskin",
+            "Survival Instincts",
+            "Frenzied Regeneration",
+        ],
+    },
+    "Augmentation Evoker": {
+        abilities: [
+            "Ebon Might",
+            "Breath of Eons",
+            "Time Skip",
+            "Spatial Paradox",
+            "Time Spiral",
+            "Zephyr",
+            "Tip the Scales",
+            "Obsidian Scales",
+        ],
+        buffs: [
+            "Ebon Might",
+            "Breath of Eons",
+            "Time Skip",
+            "Spatial Paradox",
+            "Time Spiral",
+            "Zephyr",
+            "Tip the Scales",
+            "Obsidian Scales",
+        ],
+    },
+    "Devastation Evoker": {
+        abilities: [
+            "Dragonrage",
+            "Deep Breath",
+            "Spatial Paradox",
+            "Time Spiral",
+            "Zephyr",
+            "Tip the Scales",
+            "Obsidian Scales",
+        ],
+        buffs: [
+            "Dragonrage",
+            "Deep Breath",
+            "Spatial Paradox",
+            "Time Spiral",
+            "Zephyr",
+            "Tip the Scales",
+            "Obsidian Scales",
+        ],
+    },
+    "Beast Mastery Hunter": {
+        abilities: [
+            "Bestial Wrath",
+            "Barbed Shot",
+            "Exhilaration",
+            "Survival of the Fittest",
+            "Aspect of the Turtle",
+        ],
+        buffs: [
+            "Bestial Wrath",
+            "Barbed Shot",
+            "Exhilaration",
+            "Survival of the Fittest",
+            "Aspect of the Turtle",
+        ],
+    },
+    "Marksmanship Hunter": {
+        abilities: [
+            "Trueshot",
+            "Volley",
+            "Exhilaration",
+            "Survival of the Fittest",
+            "Aspect of the Turtle",
+        ],
+        buffs: [
+            "Trueshot",
+            "Volley",
+            "Exhilaration",
+            "Survival of the Fittest",
+            "Aspect of the Turtle",
+        ],
+    },
+    "Arcane Mage": {
+        abilities: [
+            "Arcane Surge",
+            "Touch of the Magi",
+            "Alter Time",
+            "Mirror Image",
+            "Ice Cold",
+        ],
+        buffs: [
+            "Arcane Surge",
+            "Touch of the Magi",
+            "Alter Time",
+            "Mirror Image",
+            "Ice Cold",
+        ],
+    },
+    "Fire Mage": {
+        abilities: [
+            "Combustion",
+            "Pyroblast",
+            "Fire Blast",
+            "Flamestrike",
+            "Meteor",
+            "Scorch",
+            "Alter Time",
+            "Mirror Image",
+            "Ice Cold",
+        ],
+        buffs: [
+            "Combustion",
+            "Pyroblast",
+            "Fire Blast",
+            "Flamestrike",
+            "Meteor",
+            "Scorch",
+            "Alter Time",
+            "Mirror Image",
+            "Ice Cold",
+        ],
+    },
+    "Frost Mage": {
+        abilities: [
+            "Ray of Frost",
+            "Frozen Orb",
+            "Alter Time",
+            "Mirror Image",
+            "Ice Cold",
+        ],
+        buffs: [
+            "Ray of Frost",
+            "Frozen Orb",
+            "Alter Time",
+            "Mirror Image",
+            "Ice Cold",
+        ],
+    },
+    "Shadow Priest": {
+        abilities: [
+            "Voidform",
+            "Halo",
+            "Dispersion",
+            "Vampiric Embrace",
+            "Desperate Prayer",
+            "Fade",
+        ],
+        buffs: [
+            "Voidform",
+            "Halo",
+            "Dispersion",
+            "Vampiric Embrace",
+            "Desperate Prayer",
+            "Fade",
+        ],
+    },
+    "Elemental Shaman": {
+        abilities: [
+            "Ascendance",
+            "Stormkeeper",
+            "Astral Shift",
+            "Spiritwalker's Grace",
+        ],
+        buffs: [
+            "Ascendance",
+            "Stormkeeper",
+            "Astral Shift",
+            "Spiritwalker's Grace",
+        ],
+    },
+    "Affliction Warlock": {
+        abilities: [
+            "Summon Darkglare",
+            "Dark Harvest",
+            "Unending Resolve",
+            "Dark Pact",
+        ],
+        buffs: [
+            "Summon Darkglare",
+            "Dark Harvest",
+            "Unending Resolve",
+            "Dark Pact",
+        ],
+    },
+    "Demonology Warlock": {
+        abilities: [
+            "Summon Demonic Tyrant",
+            "Grimoire: Imp Lord",
+            "Grimoire: Fel Ravager",
+            "Unending Resolve",
+            "Dark Pact",
+        ],
+        buffs: [
+            "Summon Demonic Tyrant",
+            "Grimoire: Imp Lord",
+            "Grimoire: Fel Ravager",
+            "Unending Resolve",
+            "Dark Pact",
+        ],
+    },
+    "Destruction Warlock": {
+        abilities: [
+            "Summon Infernal",
+            "Havoc",
+            "Unending Resolve",
+            "Dark Pact",
+        ],
+        buffs: ["Summon Infernal", "Havoc", "Unending Resolve", "Dark Pact"],
+    },
+};
+
+function normalizeTrackedName(value: string) {
+    return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function sortByTrackedPriority<T extends { abilityName: string }>(
+    values: T[],
+    trackedNames: string[],
+) {
+    const priorityByName = new Map(
+        trackedNames.map((name, index) => [normalizeTrackedName(name), index]),
+    );
+
+    return [...values].sort((left, right) => {
+        const leftPriority = priorityByName.get(
+            normalizeTrackedName(left.abilityName),
+        );
+        const rightPriority = priorityByName.get(
+            normalizeTrackedName(right.abilityName),
+        );
+
+        if (leftPriority !== undefined && rightPriority !== undefined) {
+            return leftPriority - rightPriority;
+        }
+        if (leftPriority !== undefined) {
+            return -1;
+        }
+        if (rightPriority !== undefined) {
+            return 1;
+        }
+
+        return left.abilityName.localeCompare(right.abilityName);
+    });
+}
+
 function formatKillTime(seconds: number) {
     return `${Math.floor(seconds / 60)}:${(seconds % 60)
         .toString()
         .padStart(2, "0")}`;
 }
 
+function formatSigned(value: number, unit = "", digits = 1) {
+    const prefix = value > 0 ? "+" : "";
+    return `${prefix}${value.toFixed(digits)}${unit}`;
+}
+
+function confidenceColor(confidence: string) {
+    switch (confidence) {
+        case "high":
+            return "text-emerald-400";
+        case "medium":
+            return "text-amber-400";
+        default:
+            return "text-rose-400";
+    }
+}
+
+type ComparisonFilter = "all" | "behind" | "ahead";
+
+function matchesFilter(delta: number, filter: ComparisonFilter) {
+    if (filter === "behind") {
+        return delta < 0;
+    }
+    if (filter === "ahead") {
+        return delta > 0;
+    }
+    return true;
+}
+
 function getStageLabel(stage: string) {
     return reportStages.find((entry) => entry.key === stage)?.label ?? stage;
 }
 
-function getStageCompletionState(stage: string, status: ReportJob["status"], key: string) {
+function getStageCompletionState(
+    stage: string,
+    status: ReportJob["status"],
+    key: string,
+) {
     const stageIndex = reportStages.findIndex((entry) => entry.key === stage);
     const keyIndex = reportStages.findIndex((entry) => entry.key === key);
 
@@ -51,7 +709,10 @@ function getStageCompletionState(stage: string, status: ReportJob["status"], key
     return "pending";
 }
 
-function renderSummaryCard(title: string, content: Array<{ label: string; value: string }>) {
+function renderSummaryCard(
+    title: string,
+    content: Array<{ label: string; value: string }>,
+) {
     return (
         <div className="rounded-3xl border border-slate-800 bg-slate-950/80 p-6">
             <h2 className="text-lg font-semibold text-white">{title}</h2>
@@ -67,17 +728,23 @@ function renderSummaryCard(title: string, content: Array<{ label: string; value:
     );
 }
 
-function renderProgressView(reportJob: ReportJob, fight: Fight, character: Character) {
+function renderProgressView(
+    reportJob: ReportJob,
+    fight: Fight,
+    character: Character,
+) {
     const progressPercent =
         reportJob.progress.total > 0
             ? Math.min(
                   100,
                   Math.round(
-                      (reportJob.progress.current / reportJob.progress.total) * 100,
+                      (reportJob.progress.current / reportJob.progress.total) *
+                          100,
                   ),
               )
             : 0;
-    const isCohortStage = reportJob.stage === "cohort" && reportJob.progress.total > 0;
+    const isCohortStage =
+        reportJob.stage === "cohort" && reportJob.progress.total > 0;
 
     return (
         <>
@@ -108,7 +775,7 @@ function renderProgressView(reportJob: ReportJob, fight: Fight, character: Chara
                         </div>
                         <div className="text-sm text-slate-400">
                             {isCohortStage
-                                ? `Cohort member ${reportJob.progress.current} of ${reportJob.progress.total}`
+                                ? `Elite member ${reportJob.progress.current} of ${reportJob.progress.total}`
                                 : `Step ${Math.min(
                                       reportJob.progress.current,
                                       reportJob.progress.total || 1,
@@ -142,7 +809,10 @@ function renderProgressView(reportJob: ReportJob, fight: Fight, character: Chara
                     { label: "Encounter", value: fight.name },
                     { label: "Difficulty", value: fight.difficulty },
                     { label: "Result", value: fight.kill ? "Kill" : "Wipe" },
-                    { label: "Kill Time", value: formatKillTime(fight.killTime) },
+                    {
+                        label: "Kill Time",
+                        value: formatKillTime(fight.killTime),
+                    },
                 ])}
 
                 {renderSummaryCard("Character Summary", [
@@ -208,6 +878,10 @@ export function ReportPage() {
     usePageTitle("Report");
     const { reportJob, reportResult, setReportJob, setReportResult, setError } =
         useAnalyzeStore();
+    const [abilitySearch, setAbilitySearch] = useState("");
+    const [abilityFilter, setAbilityFilter] = useState<ComparisonFilter>("all");
+    const [buffSearch, setBuffSearch] = useState("");
+    const [buffFilter, setBuffFilter] = useState<ComparisonFilter>("all");
     const reportJobId = reportJob?.jobId;
     const reportJobStatus = reportJob?.status;
 
@@ -271,7 +945,8 @@ export function ReportPage() {
                         No analysis data available
                     </h1>
                     <p className="mt-4 max-w-2xl text-slate-300">
-                        Please go back to the analyze page and select a fight and character.
+                        Please go back to the analyze page and select a fight
+                        and character.
                     </p>
                     <div className="mt-8 flex flex-col gap-3 sm:flex-row">
                         <Link to="/analyze">
@@ -287,17 +962,56 @@ export function ReportPage() {
     }
 
     if (!reportResult && reportJob) {
-        return <section className="space-y-8">{renderProgressView(reportJob, reportJob.fight, reportJob.character)}</section>;
+        return (
+            <section className="space-y-8">
+                {renderProgressView(
+                    reportJob,
+                    reportJob.fight,
+                    reportJob.character,
+                )}
+            </section>
+        );
     }
 
     const { fight, character, comparison, ai } = reportResult!;
     const { cohortStats, deltas } = comparison;
+    const specKey = `${character.spec} ${character.class}`;
+    const trackedPriority = trackedSpecPriorities[specKey] ?? {
+        abilities: [],
+        buffs: [],
+    };
+    const filteredAbilityUsage = comparison.abilityUsage.filter((entry) => {
+        const searchMatches = entry.abilityName
+            .toLowerCase()
+            .includes(abilitySearch.trim().toLowerCase());
+        return (
+            searchMatches && matchesFilter(entry.perMinuteDelta, abilityFilter)
+        );
+    });
+    const filteredBuffUptimes = comparison.buffUptimes.filter((entry) => {
+        const searchMatches = entry.abilityName
+            .toLowerCase()
+            .includes(buffSearch.trim().toLowerCase());
+        return searchMatches && matchesFilter(entry.uptimeDelta, buffFilter);
+    });
+    const orderedAbilityUsage = sortByTrackedPriority(
+        filteredAbilityUsage,
+        trackedPriority.abilities,
+    );
+    const orderedBuffUptimes = sortByTrackedPriority(
+        filteredBuffUptimes,
+        trackedPriority.buffs,
+    );
 
     return (
         <section className="space-y-8">
             {reportJob &&
                 reportJob.status !== "completed" &&
-                renderProgressView(reportJob, reportJob.fight, reportJob.character)}
+                renderProgressView(
+                    reportJob,
+                    reportJob.fight,
+                    reportJob.character,
+                )}
 
             <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-8">
                 <p className="text-sm uppercase tracking-[0.25em] text-sky-400">
@@ -307,8 +1021,7 @@ export function ReportPage() {
                     Analysis Results
                 </h1>
                 <p className="mt-4 max-w-2xl text-slate-300">
-                    Comparison against {cohortStats.sampleSize} high-performing
-                    players.
+                    Comparison against {cohortStats.sampleSize} elite players.
                 </p>
             </div>
 
@@ -317,7 +1030,10 @@ export function ReportPage() {
                     { label: "Encounter", value: fight.name },
                     { label: "Difficulty", value: fight.difficulty },
                     { label: "Result", value: fight.kill ? "Kill" : "Wipe" },
-                    { label: "Kill Time", value: formatKillTime(fight.killTime) },
+                    {
+                        label: "Kill Time",
+                        value: formatKillTime(fight.killTime),
+                    },
                 ])}
 
                 {renderSummaryCard("Character Summary", [
@@ -334,11 +1050,277 @@ export function ReportPage() {
                 ])}
             </div>
 
+            {reportResult!.cohort.length > 0 && (
+                <div className="space-y-6">
+                    <h2 className="text-xl font-semibold text-white">
+                        Elite Logs
+                    </h2>
+                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+                        {reportResult!.cohort.map((entry) => (
+                            <a
+                                key={`${entry.reportId}-${entry.fightId}-${entry.name}`}
+                                href={entry.reportUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="rounded-3xl border border-slate-800 bg-slate-950/80 p-5 transition hover:border-sky-500/60"
+                            >
+                                <p className="text-lg font-semibold text-white">
+                                    {entry.name}
+                                </p>
+                                <p className="mt-1 text-sm text-slate-300">
+                                    {entry.class} {entry.spec}
+                                </p>
+                                <p className="mt-1 text-xs text-slate-400">
+                                    {entry.server || "Unknown server"}
+                                    {entry.serverRegion
+                                        ? ` | ${entry.serverRegion}`
+                                        : ""}
+                                </p>
+                            </a>
+                        ))}
+                    </div>
+                </div>
+            )}
+
             {ai.warning && (
                 <div className="rounded-3xl border border-amber-700/60 bg-amber-950/20 p-6">
                     <p className="text-sm text-amber-300">{ai.warning}</p>
                 </div>
             )}
+
+            <div className="space-y-6">
+                <h2 className="text-xl font-semibold text-white">
+                    Ability Usage
+                </h2>
+                <div className="rounded-3xl border border-slate-800 bg-slate-950/80 p-6">
+                    <div className="mb-6 flex flex-col gap-3 md:flex-row">
+                        <input
+                            type="text"
+                            value={abilitySearch}
+                            onChange={(event) =>
+                                setAbilitySearch(event.target.value)
+                            }
+                            placeholder="Filter abilities"
+                            className="w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-sm text-white outline-none transition focus:border-sky-500 md:max-w-sm"
+                        />
+                        <select
+                            value={abilityFilter}
+                            onChange={(event) =>
+                                setAbilityFilter(
+                                    event.target.value as ComparisonFilter,
+                                )
+                            }
+                            className="rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-sm text-white outline-none transition focus:border-sky-500"
+                        >
+                            <option value="all">All abilities</option>
+                            <option value="behind">Only behind</option>
+                            <option value="ahead">Only ahead</option>
+                        </select>
+                    </div>
+                    {filteredAbilityUsage.length > 0 ? (
+                        <div className="overflow-x-auto">
+                            <table className="min-w-full text-left text-sm">
+                                <thead className="text-slate-400">
+                                    <tr className="border-b border-slate-800">
+                                        <th className="pb-3 pr-4 font-medium">
+                                            Ability
+                                        </th>
+                                        <th className="pb-3 pr-4 font-medium">
+                                            You
+                                        </th>
+                                        <th className="pb-3 pr-4 font-medium">
+                                            Elites
+                                        </th>
+                                        <th className="pb-3 pr-4 font-medium">
+                                            Difference
+                                        </th>
+                                        <th className="pb-3 pr-4 font-medium">
+                                            Confidence
+                                        </th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {orderedAbilityUsage.map((entry) => (
+                                        <tr
+                                            key={entry.abilityId}
+                                            className="border-b border-slate-900 align-top last:border-b-0"
+                                        >
+                                            <td className="py-4 pr-4">
+                                                <p className="font-medium text-white">
+                                                    {entry.abilityName}
+                                                </p>
+                                            </td>
+                                            <td className="py-4 pr-4 text-slate-200">
+                                                <p>{entry.playerCount}</p>
+                                            </td>
+                                            <td className="py-4 pr-4 text-slate-300">
+                                                <p>
+                                                    {Number.isInteger(
+                                                        entry.cohortMedianCount,
+                                                    )
+                                                        ? entry.cohortMedianCount
+                                                        : entry.cohortMedianCount.toFixed(
+                                                              1,
+                                                          )}
+                                                </p>
+                                            </td>
+                                            <td className="py-4 pr-4">
+                                                <p
+                                                    className={
+                                                        entry.countDelta >= 0
+                                                            ? "text-emerald-400"
+                                                            : "text-rose-400"
+                                                    }
+                                                >
+                                                    {formatSigned(
+                                                        entry.countDelta,
+                                                        "",
+                                                        1,
+                                                    )}
+                                                </p>
+                                            </td>
+                                            <td className="py-4 pr-4">
+                                                <p
+                                                    className={`font-medium ${confidenceColor(entry.confidence)}`}
+                                                >
+                                                    {entry.confidence}
+                                                </p>
+                                                {entry.caution && (
+                                                    <p className="mt-1 text-xs text-amber-300">
+                                                        {entry.caution}
+                                                    </p>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    ) : (
+                        <p className="text-sm text-slate-300">
+                            No ability usage comparisons matched this filter.
+                        </p>
+                    )}
+                </div>
+            </div>
+
+            <div className="space-y-6">
+                <h2 className="text-xl font-semibold text-white">
+                    Buff Uptimes
+                </h2>
+                <div className="rounded-3xl border border-slate-800 bg-slate-950/80 p-6">
+                    <div className="mb-6 flex flex-col gap-3 md:flex-row">
+                        <input
+                            type="text"
+                            value={buffSearch}
+                            onChange={(event) =>
+                                setBuffSearch(event.target.value)
+                            }
+                            placeholder="Filter buffs"
+                            className="w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-sm text-white outline-none transition focus:border-sky-500 md:max-w-sm"
+                        />
+                        <select
+                            value={buffFilter}
+                            onChange={(event) =>
+                                setBuffFilter(
+                                    event.target.value as ComparisonFilter,
+                                )
+                            }
+                            className="rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-sm text-white outline-none transition focus:border-sky-500"
+                        >
+                            <option value="all">All buffs</option>
+                            <option value="behind">Only behind</option>
+                            <option value="ahead">Only ahead</option>
+                        </select>
+                    </div>
+                    {filteredBuffUptimes.length > 0 ? (
+                        <div className="overflow-x-auto">
+                            <table className="min-w-full text-left text-sm">
+                                <thead className="text-slate-400">
+                                    <tr className="border-b border-slate-800">
+                                        <th className="pb-3 pr-4 font-medium">
+                                            Buff
+                                        </th>
+                                        <th className="pb-3 pr-4 font-medium">
+                                            You
+                                        </th>
+                                        <th className="pb-3 pr-4 font-medium">
+                                            Cohort
+                                        </th>
+                                        <th className="pb-3 pr-4 font-medium">
+                                            Delta
+                                        </th>
+                                        <th className="pb-3 pr-4 font-medium">
+                                            Confidence
+                                        </th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {orderedBuffUptimes.map((entry) => (
+                                        <tr
+                                            key={entry.abilityId}
+                                            className="border-b border-slate-900 align-top last:border-b-0"
+                                        >
+                                            <td className="py-4 pr-4">
+                                                <p className="font-medium text-white">
+                                                    {entry.abilityName}
+                                                </p>
+                                            </td>
+                                            <td className="py-4 pr-4 text-slate-200">
+                                                <p>
+                                                    {entry.playerUptimePct.toFixed(
+                                                        1,
+                                                    )}
+                                                    %
+                                                </p>
+                                            </td>
+                                            <td className="py-4 pr-4 text-slate-300">
+                                                <p>
+                                                    {entry.cohortMedianUptimePct.toFixed(
+                                                        1,
+                                                    )}
+                                                    %
+                                                </p>
+                                            </td>
+                                            <td className="py-4 pr-4">
+                                                <p
+                                                    className={
+                                                        entry.uptimeDelta >= 0
+                                                            ? "text-emerald-400"
+                                                            : "text-rose-400"
+                                                    }
+                                                >
+                                                    {formatSigned(
+                                                        entry.uptimeDelta,
+                                                        "%",
+                                                        1,
+                                                    )}
+                                                </p>
+                                            </td>
+                                            <td className="py-4 pr-4">
+                                                <p
+                                                    className={`font-medium ${confidenceColor(entry.confidence)}`}
+                                                >
+                                                    {entry.confidence}
+                                                </p>
+                                                {entry.caution && (
+                                                    <p className="mt-1 text-xs text-amber-300">
+                                                        {entry.caution}
+                                                    </p>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    ) : (
+                        <p className="text-sm text-slate-300">
+                            No buff uptime comparisons matched this filter.
+                        </p>
+                    )}
+                </div>
+            </div>
 
             <div className="space-y-6">
                 <h2 className="text-xl font-semibold text-white">
@@ -352,7 +1334,6 @@ export function ReportPage() {
                         playerValue={deltas.castsPerMin.playerValue}
                         cohortValue={deltas.castsPerMin.cohortValue}
                         delta={deltas.castsPerMin.difference}
-                        percentile={deltas.castsPerMin.percentile}
                         confidence={
                             deltas.castsPerMin.confidence as
                                 | "high"
@@ -368,7 +1349,6 @@ export function ReportPage() {
                         playerValue={deltas.majorCdCount.playerValue}
                         cohortValue={deltas.majorCdCount.cohortValue}
                         delta={deltas.majorCdCount.difference}
-                        percentile={deltas.majorCdCount.percentile}
                         confidence={
                             deltas.majorCdCount.confidence as
                                 | "high"
@@ -384,7 +1364,6 @@ export function ReportPage() {
                         playerValue={deltas.majorCdDrift.playerValue}
                         cohortValue={deltas.majorCdDrift.cohortValue}
                         delta={deltas.majorCdDrift.difference}
-                        percentile={deltas.majorCdDrift.percentile}
                         confidence={
                             deltas.majorCdDrift.confidence as
                                 | "high"
@@ -401,7 +1380,6 @@ export function ReportPage() {
                         playerValue={deltas.buffUptime.playerValue}
                         cohortValue={deltas.buffUptime.cohortValue}
                         delta={deltas.buffUptime.difference}
-                        percentile={deltas.buffUptime.percentile}
                         confidence={
                             deltas.buffUptime.confidence as
                                 | "high"
@@ -418,7 +1396,6 @@ export function ReportPage() {
                         playerValue={deltas.downtimePct.playerValue}
                         cohortValue={deltas.downtimePct.cohortValue}
                         delta={deltas.downtimePct.difference}
-                        percentile={deltas.downtimePct.percentile}
                         confidence={
                             deltas.downtimePct.confidence as
                                 | "high"
