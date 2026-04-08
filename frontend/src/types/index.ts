@@ -146,6 +146,21 @@ export interface ReportJob {
   updatedAt: string
 }
 
+export interface AbilityTimelineResponse {
+  abilityId: number
+  abilityName: string
+  fightDurationMs: number
+  player: AbilityTimelineSeries
+  elite: AbilityTimelineSeries[]
+}
+
+export interface AbilityTimelineSeries {
+  label: string
+  subtitle?: string
+  reportUrl?: string
+  castsMs: number[]
+}
+
 export interface ReportJobProgress {
   current: number
   total: number

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -25,6 +26,21 @@ type GenerateReportResponse struct {
 	Cohort     []CohortEntry    `json:"cohort"`
 	Comparison ComparisonResult `json:"comparison"`
 	AI         AIReportSection  `json:"ai"`
+}
+
+type AbilityTimelineResponse struct {
+	AbilityID       int                    `json:"abilityId"`
+	AbilityName     string                 `json:"abilityName"`
+	FightDurationMS int64                  `json:"fightDurationMs"`
+	Player          AbilityTimelineSeries  `json:"player"`
+	Elite           []AbilityTimelineSeries `json:"elite"`
+}
+
+type AbilityTimelineSeries struct {
+	Label     string   `json:"label"`
+	Subtitle  string   `json:"subtitle,omitempty"`
+	ReportURL string   `json:"reportUrl,omitempty"`
+	CastsMS   []int64  `json:"castsMs"`
 }
 
 type CohortEntry struct {
@@ -292,6 +308,34 @@ type ReportJob struct {
 	Result    *GenerateReportResponse `json:"result,omitempty"`
 	CreatedAt time.Time               `json:"createdAt"`
 	UpdatedAt time.Time               `json:"updatedAt"`
+
+	timeline *reportTimelineData `json:"-"`
+}
+
+type reportTimelineData struct {
+	Fight       FightSummary
+	Character   CharacterSummary
+	PlayerData  timelineFightData
+	EliteData   []timelineFightData
+	EliteEntries []CohortEntry
+}
+
+type timelineFightData struct {
+	PlayerID   int                 `json:"playerId"`
+	FightID    int                 `json:"fightId"`
+	FightStart time.Time           `json:"fightStart"`
+	FightEnd   time.Time           `json:"fightEnd"`
+	CastEvents []timelineCastEvent `json:"castEvents"`
+}
+
+type timelineCastEvent struct {
+	Timestamp time.Time        `json:"timestamp"`
+	Ability   timelineAbility  `json:"ability"`
+}
+
+type timelineAbility struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
 }
 
 type ReportJobProgress struct {
@@ -367,6 +411,73 @@ func (s *ReportService) GetJob(jobID string) (ReportJob, error) {
 	return job, nil
 }
 
+func (s *ReportService) GetAbilityTimeline(jobID string, abilityID int) (AbilityTimelineResponse, error) {
+	if abilityID == 0 {
+		return AbilityTimelineResponse{}, fmt.Errorf("abilityId is required")
+	}
+
+	s.jobMu.RLock()
+	job, ok := s.jobs[jobID]
+	s.jobMu.RUnlock()
+	if !ok {
+		return AbilityTimelineResponse{}, fmt.Errorf("report job %s not found", jobID)
+	}
+	if job.timeline == nil {
+		return AbilityTimelineResponse{}, fmt.Errorf("ability timeline is not available for this job yet")
+	}
+
+	playerSeries := buildAbilityTimelineSeries(
+		job.timeline.PlayerData,
+		abilityID,
+		job.timeline.Character.Name,
+		fmt.Sprintf("%s %s", job.timeline.Character.Spec, job.timeline.Character.Class),
+		"",
+	)
+	if len(playerSeries.CastsMS) == 0 {
+		return AbilityTimelineResponse{}, fmt.Errorf("no cast timeline was available for this ability")
+	}
+
+	eliteSeries := make([]AbilityTimelineSeries, 0, len(job.timeline.EliteData))
+	for index, eliteData := range job.timeline.EliteData {
+		entry := job.timeline.EliteEntries[index]
+		subtitle := strings.TrimSpace(fmt.Sprintf("%s %s", entry.Spec, entry.Class))
+		if entry.Server != "" {
+			subtitle = strings.TrimSpace(fmt.Sprintf("%s • %s", subtitle, entry.Server))
+		}
+		series := buildAbilityTimelineSeries(
+			eliteData,
+			abilityID,
+			entry.Name,
+			subtitle,
+			entry.ReportURL,
+		)
+		if len(series.CastsMS) > 0 {
+			eliteSeries = append(eliteSeries, series)
+		}
+	}
+
+	abilityName := findAbilityName(job.timeline.PlayerData, abilityID)
+	if abilityName == "" {
+		for _, eliteData := range job.timeline.EliteData {
+			abilityName = findAbilityName(eliteData, abilityID)
+			if abilityName != "" {
+				break
+			}
+		}
+	}
+	if abilityName == "" {
+		abilityName = "Selected Ability"
+	}
+
+	return AbilityTimelineResponse{
+		AbilityID:       abilityID,
+		AbilityName:     abilityName,
+		FightDurationMS: job.timeline.PlayerData.FightEnd.Sub(job.timeline.PlayerData.FightStart).Milliseconds(),
+		Player:          playerSeries,
+		Elite:           eliteSeries,
+	}, nil
+}
+
 func (s *ReportService) runJob(jobID string, req GenerateReportRequest) {
 	ctx := context.Background()
 
@@ -374,6 +485,11 @@ func (s *ReportService) runJob(jobID string, req GenerateReportRequest) {
 	playerData, err := s.fetchPlayerData(ctx, req)
 	if err != nil {
 		s.updateJob(jobID, ReportJobFailed, "player-data", "Failed to fetch selected player fight data.", ReportJobProgress{Current: 1, Total: 5}, err.Error(), nil)
+		return
+	}
+	playerTimelineData, err := decodeTimelineFightData(playerData)
+	if err != nil {
+		s.updateJob(jobID, ReportJobFailed, "player-data", "Failed to decode selected player fight data.", ReportJobProgress{Current: 1, Total: 5}, err.Error(), nil)
 		return
 	}
 
@@ -390,19 +506,32 @@ func (s *ReportService) runJob(jobID string, req GenerateReportRequest) {
 
 	cohortData := make([]json.RawMessage, 0, len(candidates))
 	cohortEntries := make([]CohortEntry, 0, len(candidates))
+	cohortTimelineData := make([]timelineFightData, 0, len(candidates))
 	for index, candidate := range candidates {
 		s.updateJob(jobID, ReportJobRunning, "cohort", fmt.Sprintf("Fetching cohort member %d of %d.", index+1, len(candidates)), ReportJobProgress{Current: index + 1, Total: len(candidates)}, "", nil)
 		memberData, err := s.fetchCohortMember(ctx, candidate)
 		if err != nil {
 			continue
 		}
+		decodedTimeline, err := decodeTimelineFightData(memberData)
+		if err != nil {
+			continue
+		}
 		cohortData = append(cohortData, memberData)
 		cohortEntries = append(cohortEntries, buildCohortEntry(candidate))
+		cohortTimelineData = append(cohortTimelineData, decodedTimeline)
 	}
 	if len(cohortData) == 0 {
 		s.updateJob(jobID, ReportJobFailed, "cohort", "Failed to collect any cohort members.", ReportJobProgress{Current: len(candidates), Total: len(candidates)}, "no cohort member data could be fetched", nil)
 		return
 	}
+	s.setTimeline(jobID, &reportTimelineData{
+		Fight:        req.Fight,
+		Character:    req.Character,
+		PlayerData:   playerTimelineData,
+		EliteData:    cohortTimelineData,
+		EliteEntries: cohortEntries,
+	})
 
 	s.updateJob(jobID, ReportJobRunning, "analyzing", "Running deterministic comparison analysis.", ReportJobProgress{Current: 4, Total: 5}, "", nil)
 	comparison, err := s.fetchComparison(ctx, playerData, cohortData)
@@ -467,6 +596,19 @@ func (s *ReportService) setJob(job ReportJob) {
 	s.jobMu.Lock()
 	defer s.jobMu.Unlock()
 	s.jobs[job.ID] = job
+}
+
+func (s *ReportService) setTimeline(jobID string, timeline *reportTimelineData) {
+	s.jobMu.Lock()
+	defer s.jobMu.Unlock()
+
+	job, ok := s.jobs[jobID]
+	if !ok {
+		return
+	}
+	job.timeline = timeline
+	job.UpdatedAt = time.Now().UTC()
+	s.jobs[jobID] = job
 }
 
 func (s *ReportService) updateJob(jobID string, status ReportJobStatus, stage, message string, progress ReportJobProgress, errText string, result *GenerateReportResponse) {
@@ -681,4 +823,47 @@ func buildInsightRequest(req GenerateReportRequest, comparison ComparisonResult)
 			{Key: "downtimePct", Label: "Downtime Percentage", Unit: "%", HigherIsBetter: false, PlayerValue: comparison.Deltas.DowntimePct.PlayerValue, CohortValue: comparison.Deltas.DowntimePct.CohortValue, Difference: comparison.Deltas.DowntimePct.Difference, Percentile: comparison.Deltas.DowntimePct.Percentile, Confidence: comparison.Deltas.DowntimePct.Confidence, Caution: comparison.Deltas.DowntimePct.Caution},
 		},
 	}
+}
+
+func decodeTimelineFightData(raw json.RawMessage) (timelineFightData, error) {
+	var data timelineFightData
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return timelineFightData{}, err
+	}
+	return data, nil
+}
+
+func buildAbilityTimelineSeries(data timelineFightData, abilityID int, label, subtitle, reportURL string) AbilityTimelineSeries {
+	casts := make([]int64, 0)
+	for _, event := range data.CastEvents {
+		if event.Ability.ID != abilityID {
+			continue
+		}
+		casts = append(casts, event.Timestamp.Sub(data.FightStart).Milliseconds())
+	}
+
+	return AbilityTimelineSeries{
+		Label:     label,
+		Subtitle:  subtitle,
+		ReportURL: reportURL,
+		CastsMS:   casts,
+	}
+}
+
+func findAbilityName(data timelineFightData, abilityID int) string {
+	for _, event := range data.CastEvents {
+		if event.Ability.ID == abilityID {
+			return event.Ability.Name
+		}
+	}
+	return ""
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }

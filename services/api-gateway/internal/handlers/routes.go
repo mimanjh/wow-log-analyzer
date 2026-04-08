@@ -31,7 +31,13 @@ func RegisterRoutes(mux *http.ServeMux, cfg config.Config, analyzeService *servi
 	mux.HandleFunc("/api/analyze/intake", analyzeHandler.HandleIntake)
 	mux.HandleFunc("/api/analyze/characters", analyzeHandler.HandleCharacters)
 	mux.HandleFunc("/api/report/jobs", reportHandler.CreateJob)
-	mux.HandleFunc("/api/report/jobs/", reportHandler.GetJob)
+	mux.HandleFunc("/api/report/jobs/", func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/ability-timeline") {
+			reportHandler.GetAbilityTimeline(w, r)
+			return
+		}
+		reportHandler.GetJob(w, r)
+	})
 }
 
 func rootHandler(w http.ResponseWriter, r *http.Request) {

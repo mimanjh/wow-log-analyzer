@@ -4,8 +4,14 @@ import { useAnalyzeStore } from "../stores/useAnalyzeStore";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { Button } from "../components/ui/Button";
 import { MetricCard } from "../components/MetricCard";
-import { getReportJob } from "../lib/api";
-import type { Character, Fight, ReportJob } from "../types";
+import { getAbilityTimeline, getReportJob } from "../lib/api";
+import type {
+    AbilityTimelineResponse,
+    AbilityTimelineSeries,
+    Character,
+    Fight,
+    ReportJob,
+} from "../types";
 
 const reportStages = [
     { key: "player-data", label: "Fetch Player Data" },
@@ -728,6 +734,165 @@ function renderSummaryCard(
     );
 }
 
+function formatTimelineTimestamp(durationMs: number) {
+    const totalSeconds = Math.max(0, Math.round(durationMs / 1000));
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
+function TimelineRow({
+    series,
+    durationMs,
+    toneClass,
+}: {
+    series: AbilityTimelineSeries;
+    durationMs: number;
+    toneClass: string;
+}) {
+    return (
+        <div className="grid gap-3 lg:grid-cols-[220px_minmax(0,1fr)] lg:items-center">
+            <div>
+                {series.reportUrl ? (
+                    <a
+                        href={series.reportUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-medium text-white transition hover:text-sky-300"
+                    >
+                        {series.label}
+                    </a>
+                ) : (
+                    <p className="font-medium text-white">{series.label}</p>
+                )}
+                {series.subtitle && (
+                    <p className="mt-1 text-sm text-slate-400">
+                        {series.subtitle}
+                    </p>
+                )}
+            </div>
+            <div className="relative rounded-2xl border border-slate-800 bg-slate-950/80 px-3 pb-5 pt-3">
+                <div className="relative h-16 overflow-visible rounded-xl bg-slate-900/90">
+                    {series.castsMs.map((castMs, index) => {
+                        const left = Math.min(
+                            100,
+                            Math.max(0, (castMs / durationMs) * 100),
+                        );
+
+                        return (
+                            <div
+                                key={`${series.label}-${castMs}-${index}`}
+                                className="absolute inset-y-0"
+                                style={{ left: `${left}%` }}
+                            >
+                                <div className="-translate-x-1/2">
+                                    <div
+                                        className={`rounded-md px-1.5 py-0.5 text-[10px] font-semibold text-white shadow-sm ${toneClass}`}
+                                    >
+                                        {formatTimelineTimestamp(castMs)}
+                                    </div>
+                                    <div
+                                        className={`mx-auto mt-1 h-9 w-0.5 ${toneClass.replace("bg-", "bg-").replace("/20", "/90")}`}
+                                    />
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+                <div className="mt-2 flex justify-between text-xs text-slate-500">
+                    <span>0:00</span>
+                    <span>{formatTimelineTimestamp(durationMs)}</span>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function AbilityTimelineModal({
+    timeline,
+    loading,
+    error,
+    onClose,
+}: {
+    timeline: AbilityTimelineResponse | null;
+    loading: boolean;
+    error: string | null;
+    onClose: () => void;
+}) {
+    if (!loading && !timeline && !error) {
+        return null;
+    }
+
+    const durationMs = timeline?.fightDurationMs ?? 1;
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 px-4 py-8 backdrop-blur-sm">
+            <div className="max-h-[90vh] w-full max-w-6xl overflow-y-auto rounded-3xl border border-slate-800 bg-slate-900 p-6 shadow-2xl">
+                <div className="flex items-start justify-between gap-4">
+                    <div>
+                        <p className="text-sm uppercase tracking-[0.2em] text-sky-400">
+                            Ability Timeline
+                        </p>
+                        <h2 className="mt-2 text-2xl font-semibold text-white">
+                            {timeline?.abilityName ?? "Loading timeline"}
+                        </h2>
+                        <p className="mt-2 text-sm text-slate-400">
+                            Compare your cast timing against the elite fight
+                            timelines on the same boss.
+                        </p>
+                    </div>
+                    <Button variant="secondary" onClick={onClose}>
+                        Close
+                    </Button>
+                </div>
+
+                {loading && (
+                    <div className="mt-8 rounded-3xl border border-slate-800 bg-slate-950/80 p-6 text-sm text-slate-300">
+                        Loading ability timeline...
+                    </div>
+                )}
+
+                {error && (
+                    <div className="mt-8 rounded-3xl border border-rose-500/30 bg-rose-950/20 p-6 text-sm text-rose-200">
+                        {error}
+                    </div>
+                )}
+
+                {timeline && (
+                    <div className="mt-8 space-y-8">
+                        <div className="space-y-4">
+                            <h3 className="text-lg font-semibold text-white">
+                                You
+                            </h3>
+                            <TimelineRow
+                                series={timeline.player}
+                                durationMs={durationMs}
+                                toneClass="bg-sky-500/90"
+                            />
+                        </div>
+
+                        <div className="space-y-4">
+                            <h3 className="text-lg font-semibold text-white">
+                                Elite
+                            </h3>
+                            <div className="space-y-4">
+                                {timeline.elite.map((series) => (
+                                    <TimelineRow
+                                        key={`${series.label}-${series.reportUrl ?? "elite"}`}
+                                        series={series}
+                                        durationMs={durationMs}
+                                        toneClass="bg-amber-500/90"
+                                    />
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
 function renderProgressView(
     reportJob: ReportJob,
     fight: Fight,
@@ -882,6 +1047,14 @@ export function ReportPage() {
     const [abilityFilter, setAbilityFilter] = useState<ComparisonFilter>("all");
     const [buffSearch, setBuffSearch] = useState("");
     const [buffFilter, setBuffFilter] = useState<ComparisonFilter>("all");
+    const [timelineAbilityId, setTimelineAbilityId] = useState<number | null>(
+        null,
+    );
+    const [timelineCache, setTimelineCache] = useState<
+        Record<number, AbilityTimelineResponse>
+    >({});
+    const [timelineLoading, setTimelineLoading] = useState(false);
+    const [timelineError, setTimelineError] = useState<string | null>(null);
     const reportJobId = reportJob?.jobId;
     const reportJobStatus = reportJob?.status;
 
@@ -934,6 +1107,13 @@ export function ReportPage() {
         };
     }, [reportJobId, reportJobStatus, setError, setReportJob, setReportResult]);
 
+    useEffect(() => {
+        setTimelineAbilityId(null);
+        setTimelineCache({});
+        setTimelineLoading(false);
+        setTimelineError(null);
+    }, [reportJobId]);
+
     if (!reportJob && !reportResult) {
         return (
             <section className="space-y-8">
@@ -980,30 +1160,62 @@ export function ReportPage() {
         abilities: [],
         buffs: [],
     };
-    const filteredAbilityUsage = comparison.abilityUsage.filter((entry) => {
-        const searchMatches = entry.abilityName
-            .toLowerCase()
-            .includes(abilitySearch.trim().toLowerCase());
-        return (
-            searchMatches && matchesFilter(entry.perMinuteDelta, abilityFilter)
-        );
-    });
+      const filteredAbilityUsage = comparison.abilityUsage.filter((entry) => {
+          const searchMatches = entry.abilityName
+              .toLowerCase()
+              .includes(abilitySearch.trim().toLowerCase());
+          return searchMatches && matchesFilter(entry.countDelta, abilityFilter);
+      });
     const filteredBuffUptimes = comparison.buffUptimes.filter((entry) => {
         const searchMatches = entry.abilityName
             .toLowerCase()
             .includes(buffSearch.trim().toLowerCase());
         return searchMatches && matchesFilter(entry.uptimeDelta, buffFilter);
     });
-    const orderedAbilityUsage = sortByTrackedPriority(
-        filteredAbilityUsage,
-        trackedPriority.abilities,
-    );
-    const orderedBuffUptimes = sortByTrackedPriority(
-        filteredBuffUptimes,
-        trackedPriority.buffs,
-    );
+      const orderedAbilityUsage = sortByTrackedPriority(
+          filteredAbilityUsage,
+          trackedPriority.abilities,
+      );
+      const orderedBuffUptimes = sortByTrackedPriority(
+          filteredBuffUptimes,
+          trackedPriority.buffs,
+      );
+      const selectedTimeline =
+          timelineAbilityId !== null ? timelineCache[timelineAbilityId] : null;
+
+      const openAbilityTimeline = async (abilityId: number) => {
+          if (!reportJobId) {
+              setTimelineError("Timeline data is not available for this report.");
+              return;
+          }
+
+          setTimelineAbilityId(abilityId);
+          setTimelineError(null);
+
+          if (timelineCache[abilityId]) {
+              return;
+          }
+
+          setTimelineLoading(true);
+          try {
+              const response = await getAbilityTimeline(reportJobId, abilityId);
+              setTimelineCache((current) => ({
+                  ...current,
+                  [abilityId]: response,
+              }));
+          } catch (error) {
+              setTimelineError(
+                  error instanceof Error
+                      ? error.message
+                      : "Failed to load ability timeline",
+              );
+          } finally {
+              setTimelineLoading(false);
+          }
+      };
 
     return (
+        <>
         <section className="space-y-8">
             {reportJob &&
                 reportJob.status !== "completed" &&
@@ -1129,7 +1341,7 @@ export function ReportPage() {
                                             You
                                         </th>
                                         <th className="pb-3 pr-4 font-medium">
-                                            Elites
+                                            Elite (MED)
                                         </th>
                                         <th className="pb-3 pr-4 font-medium">
                                             Difference
@@ -1143,7 +1355,12 @@ export function ReportPage() {
                                     {orderedAbilityUsage.map((entry) => (
                                         <tr
                                             key={entry.abilityId}
-                                            className="border-b border-slate-900 align-top last:border-b-0"
+                                            className="cursor-pointer border-b border-slate-900 align-top transition hover:bg-slate-900/60 last:border-b-0"
+                                            onClick={() => {
+                                                void openAbilityTimeline(
+                                                    entry.abilityId,
+                                                );
+                                            }}
                                         >
                                             <td className="py-4 pr-4">
                                                 <p className="font-medium text-white">
@@ -1472,5 +1689,16 @@ export function ReportPage() {
                 </Link>
             </div>
         </section>
+        <AbilityTimelineModal
+            timeline={selectedTimeline}
+            loading={timelineLoading}
+            error={timelineError}
+            onClose={() => {
+                setTimelineAbilityId(null);
+                setTimelineError(null);
+                setTimelineLoading(false);
+            }}
+        />
+        </>
     );
 }

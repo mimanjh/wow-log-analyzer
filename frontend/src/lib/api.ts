@@ -1,4 +1,5 @@
 import type {
+  AbilityTimelineResponse,
   AuthStatus,
   BrowserCharacter,
   Character,
@@ -65,6 +66,26 @@ export async function getReportJob(jobId: string): Promise<ReportJob> {
   if (!response.ok) {
     const errorText = await response.text()
     throw new Error(errorText || 'Failed to load report job')
+  }
+
+  return response.json()
+}
+
+export async function getAbilityTimeline(
+  jobId: string,
+  abilityId: number,
+): Promise<AbilityTimelineResponse> {
+  const params = new URLSearchParams({
+    abilityId: String(abilityId),
+  })
+
+  const response = await fetch(
+    `/api/report/jobs/${encodeURIComponent(jobId)}/ability-timeline?${params.toString()}`,
+  )
+
+  if (!response.ok) {
+    const errorText = await response.text()
+    throw new Error(errorText || 'Failed to load ability timeline')
   }
 
   return response.json()
