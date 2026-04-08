@@ -1,7 +1,6 @@
 package service
 
 import (
-	"fmt"
 	"math"
 	"sort"
 	"time"
@@ -119,9 +118,10 @@ func (s *AnalysisService) calculateMajorCDDrift(cooldowns []types.CooldownEvent,
 	}
 }
 
-// calculateBuffUptime calculates buff uptime percentage
-func (s *AnalysisService) calculateBuffUptime(buffEvents []types.BuffEvent, duration time.Duration) types.BuffUptimeMetric {
-	if len(buffEvents) == 0 {
+// calculateBuffUptime calculates a representative buff uptime percentage across observed self-buffs.
+func (s *AnalysisService) calculateBuffUptime(data types.PlayerFightData) types.BuffUptimeMetric {
+	duration := data.FightEnd.Sub(data.FightStart)
+	if len(data.BuffEvents) == 0 {
 		return types.BuffUptimeMetric{
 			Value:         0,
 			TotalUptime:   0,
@@ -131,45 +131,41 @@ func (s *AnalysisService) calculateBuffUptime(buffEvents []types.BuffEvent, dura
 		}
 	}
 
-	// Group buff events by ability and target
-	buffUptimes := make(map[string]time.Duration)
-
-	for _, event := range buffEvents {
-		if event.Ability.IsBuff {
-			key := fmt.Sprintf("%d-%d", event.Ability.ID, event.TargetID)
-			if event.EventType == "apply" {
-				// Find corresponding remove event
-				for _, removeEvent := range buffEvents {
-					if removeEvent.EventType == "remove" &&
-					   removeEvent.Ability.ID == event.Ability.ID &&
-					   removeEvent.TargetID == event.TargetID &&
-					   removeEvent.Timestamp.After(event.Timestamp) {
-						uptime := removeEvent.Timestamp.Sub(event.Timestamp)
-						buffUptimes[key] += uptime
-						break
-					}
-				}
-			}
+	summaries := summarizeBuffUptime(data)
+	if len(summaries) == 0 {
+		return types.BuffUptimeMetric{
+			Value:         0,
+			TotalUptime:   0,
+			FightDuration: duration.Seconds(),
+			Confidence:    "low",
+			Caution:       "No buff uptime windows could be derived",
 		}
 	}
 
-	totalUptime := 0.0
-	for _, uptime := range buffUptimes {
-		totalUptime += uptime.Seconds()
+	totalUptimePct := 0.0
+	for _, summary := range summaries {
+		totalUptimePct += summary.UptimePct
 	}
 
 	fightDuration := duration.Seconds()
-	uptimePercentage := (totalUptime / fightDuration) * 100
+	uptimePercentage := totalUptimePct / float64(len(summaries))
+	if uptimePercentage < 0 {
+		uptimePercentage = 0
+	}
+	if uptimePercentage > 100 {
+		uptimePercentage = 100
+	}
+	totalUptime := (uptimePercentage / 100) * fightDuration
 
 	confidence := "high"
 	var caution string
-	if len(buffUptimes) < 5 {
+	if len(summaries) < 3 {
 		confidence = "medium"
-		caution = "Low number of buff applications detected"
+		caution = "Low number of tracked buff windows detected"
 	}
 
 	return types.BuffUptimeMetric{
-		Value:         math.Round(uptimePercentage*100) / 100, // round to 2 decimal places
+		Value:         math.Round(uptimePercentage*100) / 100,
 		TotalUptime:   math.Round(totalUptime*100) / 100,
 		FightDuration: fightDuration,
 		Confidence:    confidence,

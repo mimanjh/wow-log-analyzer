@@ -82,6 +82,15 @@ func validateInsightRequest(req types.InsightGenerationRequest) error {
 		}
 	}
 
+	for _, highlight := range append(
+		append([]types.InsightHighlight(nil), req.AbilityHighlights...),
+		req.BuffHighlights...,
+	) {
+		if strings.TrimSpace(highlight.Name) == "" {
+			return errors.New("highlight name is required")
+		}
+	}
+
 	return nil
 }
 
@@ -307,14 +316,53 @@ func buildPrompt(req types.InsightGenerationRequest) string {
 		)
 	}
 
-	return fmt.Sprintf(
-		"Generate exactly 3 concise cautious insights and 1 focus recommendation for %s %s on %s %s. Use only these deterministic comparison outputs. Do not mention raw logs or invent causality.\n%s",
-		req.Context.CharacterName,
-		req.Context.CharacterSpec,
-		req.Context.Difficulty,
-		req.Context.EncounterName,
+	var abilityLines []string
+	for _, highlight := range req.AbilityHighlights {
+		abilityLines = append(
+			abilityLines,
+			fmt.Sprintf(
+				"- %s: player=%s, elite=%s, delta=%s",
+				highlight.Name,
+				formatValue(highlight.PlayerValue, highlight.Unit),
+				formatValue(highlight.EliteValue, highlight.Unit),
+				formatSigned(highlight.Difference, highlight.Unit),
+			),
+		)
+	}
+
+	var buffLines []string
+	for _, highlight := range req.BuffHighlights {
+		buffLines = append(
+			buffLines,
+			fmt.Sprintf(
+				"- %s: player=%s, elite=%s, delta=%s",
+				highlight.Name,
+				formatValue(highlight.PlayerValue, highlight.Unit),
+				formatValue(highlight.EliteValue, highlight.Unit),
+				formatSigned(highlight.Difference, highlight.Unit),
+			),
+		)
+	}
+
+	sections := []string{
+		fmt.Sprintf(
+			"Generate exactly 3 concise cautious insights and 1 focus recommendation for %s %s on %s %s. Use only these deterministic comparison outputs. Do not mention raw logs or invent causality.",
+			req.Context.CharacterName,
+			req.Context.CharacterSpec,
+			req.Context.Difficulty,
+			req.Context.EncounterName,
+		),
 		strings.Join(metricLines, "\n"),
-	)
+	}
+
+	if len(abilityLines) > 0 {
+		sections = append(sections, "Top ability usage comparisons:\n"+strings.Join(abilityLines, "\n"))
+	}
+	if len(buffLines) > 0 {
+		sections = append(sections, "Top buff uptime comparisons:\n"+strings.Join(buffLines, "\n"))
+	}
+
+	return strings.Join(sections, "\n\n")
 }
 
 func emptyFallback(value, fallback string) string {

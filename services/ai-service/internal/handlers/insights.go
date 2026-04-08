@@ -34,6 +34,7 @@ func (h *InsightHandler) Generate(w http.ResponseWriter, r *http.Request) {
 
 	response, err := h.insightService.GenerateInsights(r.Context(), req)
 	if err != nil {
+		log.Printf("Failed to generate insights: %v", err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}

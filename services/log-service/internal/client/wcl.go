@@ -21,6 +21,12 @@ type httpDoer interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
+type graphqlErrorResponse struct {
+	Errors []struct {
+		Message string `json:"message"`
+	} `json:"errors"`
+}
+
 // WCLClient defines the interface for Warcraft Logs API interactions
 type WCLClient interface {
 	GetReportMetadata(reportID string) (*types.NormalizedReport, error)
@@ -328,7 +334,26 @@ func (c *WCLHTTPClient) makeAuthorizedGraphQLRequest(endpoint, accessToken, quer
 		return fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(response); err != nil {
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	var graphqlErr graphqlErrorResponse
+	if err := json.Unmarshal(body, &graphqlErr); err == nil && len(graphqlErr.Errors) > 0 {
+		messages := make([]string, 0, len(graphqlErr.Errors))
+		for _, graphqlMessage := range graphqlErr.Errors {
+			if strings.TrimSpace(graphqlMessage.Message) != "" {
+				messages = append(messages, graphqlMessage.Message)
+			}
+		}
+		if len(messages) > 0 {
+			return fmt.Errorf("graphql errors: %s", strings.Join(messages, "; "))
+		}
+		return fmt.Errorf("graphql request failed with unknown errors")
+	}
+
+	if err := json.Unmarshal(body, response); err != nil {
 		return fmt.Errorf("failed to decode response: %w", err)
 	}
 
@@ -385,7 +410,7 @@ func (c *WCLHTTPClient) GetOwnedCharacters(accessToken string) ([]types.OwnedCha
 								name
 							}
 						}
-						recentReports(limit: 1, page: 1) {
+						recentReports(limit: 10, page: 1) {
 							data {
 								rankedCharacters {
 									canonicalID
@@ -393,10 +418,6 @@ func (c *WCLHTTPClient) GetOwnedCharacters(accessToken string) ([]types.OwnedCha
 									classID
 									server {
 										name
-										slug
-										region {
-											name
-										}
 									}
 								}
 							}
@@ -421,15 +442,40 @@ func (c *WCLHTTPClient) GetOwnedCharacters(accessToken string) ([]types.OwnedCha
 	rawCharacters := response.Data.UserData.CurrentUser.Characters
 	characters := make([]types.OwnedCharacter, 0, len(rawCharacters))
 	for _, character := range rawCharacters {
+		fmt.Printf(
+			"WCL owned character raw: canonicalID=%d name=%s classID=%d server=%s region=%s recentReports=%d\n",
+			character.CanonicalID,
+			character.Name,
+			character.ClassID,
+			character.Server.Name,
+			character.Server.Region.Name,
+			len(character.RecentReports.Data),
+		)
+
 		classID := character.ClassID
-		if derivedClassID, ok := deriveCharacterClassID(character); ok {
+		className := classNameFromID(character.ClassID)
+		classSource := "top-level classID"
+		if derivedClassID, ok := deriveCharacterClassIDFromRecentReports(character); ok {
 			classID = derivedClassID
+			className = classNameFromID(derivedClassID)
+			classSource = "recentReports exact match"
 		}
+		fmt.Printf(
+			"Owned character class mapping: name=%s canonicalID=%d server=%s topLevelClassID=%d topLevelClass=%s finalClassID=%d finalClass=%s source=%s\n",
+			character.Name,
+			character.CanonicalID,
+			character.Server.Name,
+			character.ClassID,
+			classNameFromID(character.ClassID),
+			classID,
+			className,
+			classSource,
+		)
 
 		characters = append(characters, types.OwnedCharacter{
 			ID:           character.CanonicalID,
 			Name:         character.Name,
-			Class:        classNameFromID(classID),
+			Class:        className,
 			ServerName:   character.Server.Name,
 			ServerRegion: character.Server.Region.Name,
 			ServerSlug:   character.Server.Slug,
@@ -938,6 +984,11 @@ func (c *WCLHTTPClient) getFightCharacters(reportID string, fightID int) ([]type
 }
 
 func (c *WCLHTTPClient) fetchPlayerFightData(reportID string, fight types.NormalizedFight, actorID int) (types.PlayerFightData, error) {
+	reportMetadata, err := c.GetReportMetadata(reportID)
+	if err != nil {
+		return types.PlayerFightData{}, err
+	}
+
 	abilityNames, err := c.getReportAbilityNames(reportID)
 	if err != nil {
 		return types.PlayerFightData{}, err
@@ -965,11 +1016,11 @@ func (c *WCLHTTPClient) fetchPlayerFightData(reportID string, fight types.Normal
 		FightID:        fight.ID,
 		FightStart:     fight.StartTime,
 		FightEnd:       fight.EndTime,
-		CastEvents:     normalizeCastEvents(castRaw, abilityNames),
-		DamageEvents:   normalizeDamageEvents(damageRaw, abilityNames),
-		HealEvents:     normalizeHealEvents(healRaw, abilityNames),
-		BuffEvents:     normalizeBuffEvents(buffRaw, abilityNames),
-		CooldownEvents: normalizeCooldownEvents(castRaw, abilityNames),
+		CastEvents:     normalizeCastEvents(reportMetadata.StartTime.UnixMilli(), castRaw, abilityNames),
+		DamageEvents:   normalizeDamageEvents(reportMetadata.StartTime.UnixMilli(), damageRaw, abilityNames),
+		HealEvents:     normalizeHealEvents(reportMetadata.StartTime.UnixMilli(), healRaw, abilityNames),
+		BuffEvents:     normalizeBuffEvents(reportMetadata.StartTime.UnixMilli(), buffRaw, abilityNames),
+		CooldownEvents: normalizeCooldownEvents(reportMetadata.StartTime.UnixMilli(), castRaw, abilityNames),
 	}, nil
 }
 
@@ -1118,11 +1169,11 @@ func matchRankingToCharacter(characters []types.CharacterOption, ranking WCLRank
 	return types.CharacterOption{}, false
 }
 
-func normalizeCastEvents(raw []map[string]interface{}, abilityNames map[int]string) []types.CastEvent {
+func normalizeCastEvents(reportStartTime int64, raw []map[string]interface{}, abilityNames map[int]string) []types.CastEvent {
 	events := make([]types.CastEvent, 0, len(raw))
 	for _, event := range raw {
 		events = append(events, types.CastEvent{
-			Timestamp: parseTimestamp(event["timestamp"]),
+			Timestamp: parseTimestamp(reportStartTime, event["timestamp"]),
 			Ability:   parseAbility(event, abilityNames),
 			SourceID:  parseActorID(event, "sourceID", "source"),
 		})
@@ -1130,11 +1181,11 @@ func normalizeCastEvents(raw []map[string]interface{}, abilityNames map[int]stri
 	return events
 }
 
-func normalizeDamageEvents(raw []map[string]interface{}, abilityNames map[int]string) []types.DamageEvent {
+func normalizeDamageEvents(reportStartTime int64, raw []map[string]interface{}, abilityNames map[int]string) []types.DamageEvent {
 	events := make([]types.DamageEvent, 0, len(raw))
 	for _, event := range raw {
 		events = append(events, types.DamageEvent{
-			Timestamp: parseTimestamp(event["timestamp"]),
+			Timestamp: parseTimestamp(reportStartTime, event["timestamp"]),
 			Ability:   parseAbility(event, abilityNames),
 			SourceID:  parseActorID(event, "sourceID", "source"),
 			TargetID:  parseActorID(event, "targetID", "target"),
@@ -1144,11 +1195,11 @@ func normalizeDamageEvents(raw []map[string]interface{}, abilityNames map[int]st
 	return events
 }
 
-func normalizeHealEvents(raw []map[string]interface{}, abilityNames map[int]string) []types.HealEvent {
+func normalizeHealEvents(reportStartTime int64, raw []map[string]interface{}, abilityNames map[int]string) []types.HealEvent {
 	events := make([]types.HealEvent, 0, len(raw))
 	for _, event := range raw {
 		events = append(events, types.HealEvent{
-			Timestamp: parseTimestamp(event["timestamp"]),
+			Timestamp: parseTimestamp(reportStartTime, event["timestamp"]),
 			Ability:   parseAbility(event, abilityNames),
 			SourceID:  parseActorID(event, "sourceID", "source"),
 			TargetID:  parseActorID(event, "targetID", "target"),
@@ -1158,7 +1209,7 @@ func normalizeHealEvents(raw []map[string]interface{}, abilityNames map[int]stri
 	return events
 }
 
-func normalizeBuffEvents(raw []map[string]interface{}, abilityNames map[int]string) []types.BuffEvent {
+func normalizeBuffEvents(reportStartTime int64, raw []map[string]interface{}, abilityNames map[int]string) []types.BuffEvent {
 	events := make([]types.BuffEvent, 0, len(raw))
 	for _, event := range raw {
 		eventType := fmt.Sprintf("%v", event["type"])
@@ -1177,7 +1228,7 @@ func normalizeBuffEvents(raw []map[string]interface{}, abilityNames map[int]stri
 		ability := parseAbility(event, abilityNames)
 		ability.IsBuff = true
 		events = append(events, types.BuffEvent{
-			Timestamp: parseTimestamp(event["timestamp"]),
+			Timestamp: parseTimestamp(reportStartTime, event["timestamp"]),
 			Ability:   ability,
 			SourceID:  parseActorID(event, "sourceID", "source"),
 			TargetID:  parseActorID(event, "targetID", "target"),
@@ -1187,7 +1238,7 @@ func normalizeBuffEvents(raw []map[string]interface{}, abilityNames map[int]stri
 	return events
 }
 
-func normalizeCooldownEvents(raw []map[string]interface{}, abilityNames map[int]string) []types.CooldownEvent {
+func normalizeCooldownEvents(reportStartTime int64, raw []map[string]interface{}, abilityNames map[int]string) []types.CooldownEvent {
 	events := make([]types.CooldownEvent, 0)
 	seen := map[int]int{}
 
@@ -1206,7 +1257,7 @@ func normalizeCooldownEvents(raw []map[string]interface{}, abilityNames map[int]
 		}
 		ability.IsMajorCD = true
 		events = append(events, types.CooldownEvent{
-			Timestamp: parseTimestamp(event["timestamp"]),
+			Timestamp: parseTimestamp(reportStartTime, event["timestamp"]),
 			Ability:   ability,
 			SourceID:  parseActorID(event, "sourceID", "source"),
 			EventType: "start",
@@ -1216,8 +1267,8 @@ func normalizeCooldownEvents(raw []map[string]interface{}, abilityNames map[int]
 	return events
 }
 
-func parseTimestamp(value interface{}) time.Time {
-	ms := parseInt64(value)
+func parseTimestamp(reportStartTime int64, value interface{}) time.Time {
+	ms := absoluteReportTimestamp(reportStartTime, parseInt64(value))
 	if ms <= 0 {
 		return time.Time{}
 	}
@@ -1371,6 +1422,7 @@ func (c *WCLHTTPClient) getCurrentUserCharacterReports(accessToken string, chara
 						canonicalID
 						name
 						classID
+						className
 						server {
 							name
 							slug
@@ -1432,27 +1484,27 @@ func (c *WCLHTTPClient) getCurrentUserCharacterReports(accessToken string, chara
 func classNameFromID(classID int) string {
 	switch classID {
 	case 1:
-		return "Warrior"
+		return "Death Knight"
 	case 2:
-		return "Paladin"
+		return "Druid"
 	case 3:
 		return "Hunter"
 	case 4:
-		return "Rogue"
-	case 5:
-		return "Priest"
-	case 6:
-		return "Death Knight"
-	case 7:
-		return "Shaman"
-	case 8:
 		return "Mage"
-	case 9:
-		return "Warlock"
-	case 10:
+	case 5:
 		return "Monk"
+	case 6:
+		return "Paladin"
+	case 7:
+		return "Priest"
+	case 8:
+		return "Rogue"
+	case 9:
+		return "Shaman"
+	case 10:
+		return "Warlock"
 	case 11:
-		return "Druid"
+		return "Warrior"
 	case 12:
 		return "Demon Hunter"
 	case 13:
@@ -1462,26 +1514,52 @@ func classNameFromID(classID int) string {
 	}
 }
 
-func deriveCharacterClassID(character WCLUserCharacter) (int, bool) {
+func deriveCharacterClassIDFromRecentReports(character WCLUserCharacter) (int, bool) {
+	canonicalMatches := make(map[int]int)
+	nameServerMatches := make(map[int]int)
+
 	for _, report := range character.RecentReports.Data {
 		for _, rankedCharacter := range report.RankedCharacters {
-			if rankedCharacter.CanonicalID != 0 &&
-				rankedCharacter.CanonicalID == character.CanonicalID {
-				return rankedCharacter.ClassID, true
+			if rankedCharacter.ClassID == 0 {
+				continue
+			}
+			if rankedCharacter.CanonicalID != 0 && rankedCharacter.CanonicalID == character.CanonicalID {
+				canonicalMatches[rankedCharacter.ClassID]++
+				continue
+			}
+			if strings.EqualFold(strings.TrimSpace(rankedCharacter.Name), strings.TrimSpace(character.Name)) &&
+				strings.EqualFold(strings.TrimSpace(rankedCharacter.Server.Name), strings.TrimSpace(character.Server.Name)) {
+				nameServerMatches[rankedCharacter.ClassID]++
 			}
 		}
 	}
 
-	for _, report := range character.RecentReports.Data {
-		for _, rankedCharacter := range report.RankedCharacters {
-			if strings.EqualFold(strings.TrimSpace(rankedCharacter.Name), strings.TrimSpace(character.Name)) &&
-				strings.EqualFold(strings.TrimSpace(rankedCharacter.Server.Name), strings.TrimSpace(character.Server.Name)) {
-				return rankedCharacter.ClassID, true
-			}
-		}
+	if classID, ok := mostFrequentClassID(canonicalMatches); ok {
+		return classID, true
+	}
+	if classID, ok := mostFrequentClassID(nameServerMatches); ok {
+		return classID, true
 	}
 
 	return 0, false
+}
+
+func mostFrequentClassID(counts map[int]int) (int, bool) {
+	bestClassID := 0
+	bestCount := 0
+
+	for classID, count := range counts {
+		if count > bestCount {
+			bestClassID = classID
+			bestCount = count
+		}
+	}
+
+	if bestClassID == 0 || bestCount == 0 {
+		return 0, false
+	}
+
+	return bestClassID, true
 }
 
 func isAllowedRaidReportTitle(title string) bool {

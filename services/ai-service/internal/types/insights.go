@@ -1,8 +1,10 @@
 package types
 
 type InsightGenerationRequest struct {
-	Context InsightContext  `json:"context"`
-	Metrics []InsightMetric `json:"metrics"`
+	Context          InsightContext       `json:"context"`
+	Metrics          []InsightMetric      `json:"metrics"`
+	AbilityHighlights []InsightHighlight  `json:"abilityHighlights,omitempty"`
+	BuffHighlights    []InsightHighlight  `json:"buffHighlights,omitempty"`
 }
 
 type InsightContext struct {
@@ -26,6 +28,14 @@ type InsightMetric struct {
 	Percentile     float64 `json:"percentile"`
 	Confidence     string  `json:"confidence"`
 	Caution        string  `json:"caution,omitempty"`
+}
+
+type InsightHighlight struct {
+	Name       string  `json:"name"`
+	PlayerValue float64 `json:"playerValue"`
+	EliteValue  float64 `json:"eliteValue"`
+	Difference  float64 `json:"difference"`
+	Unit        string  `json:"unit,omitempty"`
 }
 
 type InsightGenerationResponse struct {

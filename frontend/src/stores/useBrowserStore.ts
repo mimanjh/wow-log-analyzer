@@ -2,11 +2,14 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { BrowserState } from "../types";
 
+const REPORTS_TTL_MS = 24 * 60 * 60 * 1000;
+
 const initialState = {
     auth: null,
     characters: [],
     selectedCharacter: null,
     reports: [],
+    reportsCachedAt: null,
     nextCursor: null,
     hasMoreReports: false,
     isAuthLoading: false,
@@ -25,16 +28,23 @@ export const useBrowserStore = create<BrowserState>()(
             setCharacters: (characters) => set({ characters }),
 
             finishCharactersLoad: (characters) =>
-                set({
+                set((state) => ({
                     characters,
+                    selectedCharacter: state.selectedCharacter
+                        ? characters.find(
+                              (character) =>
+                                  character.id === state.selectedCharacter?.id,
+                          ) ?? state.selectedCharacter
+                        : null,
                     isCharactersLoading: false,
                     error: null,
-                }),
+                })),
 
             setSelectedCharacter: (selectedCharacter) =>
                 set({
                     selectedCharacter,
                     reports: [],
+                    reportsCachedAt: null,
                     nextCursor: null,
                     hasMoreReports: false,
                     error: null,
@@ -43,6 +53,7 @@ export const useBrowserStore = create<BrowserState>()(
             resetReports: () =>
                 set({
                     reports: [],
+                    reportsCachedAt: null,
                     nextCursor: null,
                     hasMoreReports: false,
                 }),
@@ -50,6 +61,7 @@ export const useBrowserStore = create<BrowserState>()(
             appendReports: (page) =>
                 set((state) => ({
                     reports: [...state.reports, ...page.reports],
+                    reportsCachedAt: Date.now(),
                     nextCursor: page.nextCursor,
                     hasMoreReports: page.hasMore,
                     isReportsLoading: false,
@@ -76,9 +88,39 @@ export const useBrowserStore = create<BrowserState>()(
             name: "wow-log-browser",
             partialize: (state) => ({
                 auth: state.auth,
-                characters: state.characters,
                 selectedCharacter: state.selectedCharacter,
+                reports: state.reports,
+                reportsCachedAt: state.reportsCachedAt,
+                nextCursor: state.nextCursor,
+                hasMoreReports: state.hasMoreReports,
             }),
+            merge: (persistedState, currentState) => {
+                const persisted = {
+                    ...(persistedState as Partial<BrowserState>),
+                };
+                delete (persisted as Partial<BrowserState>).characters;
+
+                const mergedState = {
+                    ...currentState,
+                    ...persisted,
+                };
+                const reportsCachedAt = mergedState.reportsCachedAt;
+
+                if (
+                    reportsCachedAt !== null &&
+                    Date.now() - reportsCachedAt > REPORTS_TTL_MS
+                ) {
+                    return {
+                        ...mergedState,
+                        reports: [],
+                        reportsCachedAt: null,
+                        nextCursor: null,
+                        hasMoreReports: false,
+                    };
+                }
+
+                return mergedState;
+            },
         },
     ),
 );

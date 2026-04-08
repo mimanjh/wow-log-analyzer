@@ -190,3 +190,95 @@ func TestWCLHTTPClient_normalizeDifficulty(t *testing.T) {
 		}
 	}
 }
+
+func TestDeriveCharacterClassIDFromRecentReports_UsesExactCanonicalIDMatch(t *testing.T) {
+	character := WCLUserCharacter{
+		CanonicalID: 12345,
+		ClassID:     6,
+		RecentReports: WCLReportPagination{
+			Data: []WCLReportSummary{
+				{
+					RankedCharacters: []WCLRankedCharacter{
+						{CanonicalID: 99999, ClassID: 2},
+						{CanonicalID: 12345, ClassID: 11},
+					},
+				},
+			},
+		},
+	}
+
+	classID, ok := deriveCharacterClassIDFromRecentReports(character)
+	if !ok {
+		t.Fatalf("expected exact canonicalID match to be found")
+	}
+	if classID != 11 {
+		t.Fatalf("expected derived class id 11, got %d", classID)
+	}
+}
+
+func TestDeriveCharacterClassIDFromRecentReports_IgnoresNonMatchingCharacters(t *testing.T) {
+	character := WCLUserCharacter{
+		CanonicalID: 12345,
+		Name:        "Jaicher",
+		ClassID:     2,
+		Server: WCLServer{
+			Name: "Tichondrius",
+		},
+		RecentReports: WCLReportPagination{
+			Data: []WCLReportSummary{
+				{
+					RankedCharacters: []WCLRankedCharacter{
+						{
+							CanonicalID: 99999,
+							Name:        "SomeoneElse",
+							ClassID:     6,
+							Server: WCLServer{
+								Name: "Tichondrius",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	_, ok := deriveCharacterClassIDFromRecentReports(character)
+	if ok {
+		t.Fatalf("expected no derived class id without exact canonicalID match")
+	}
+}
+
+func TestDeriveCharacterClassIDFromRecentReports_FallsBackToExactNameAndServerMatch(t *testing.T) {
+	character := WCLUserCharacter{
+		CanonicalID: 12345,
+		Name:        "Jaicherdk",
+		ClassID:     1,
+		Server: WCLServer{
+			Name: "Tichondrius",
+		},
+		RecentReports: WCLReportPagination{
+			Data: []WCLReportSummary{
+				{
+					RankedCharacters: []WCLRankedCharacter{
+						{
+							CanonicalID: 99999,
+							Name:        "Jaicherdk",
+							ClassID:     6,
+							Server: WCLServer{
+								Name: "Tichondrius",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	classID, ok := deriveCharacterClassIDFromRecentReports(character)
+	if !ok {
+		t.Fatalf("expected exact name+server match to derive class id")
+	}
+	if classID != 6 {
+		t.Fatalf("expected derived class id 6, got %d", classID)
+	}
+}

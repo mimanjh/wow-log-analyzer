@@ -28,6 +28,7 @@ export interface BrowserState {
   characters: BrowserCharacter[]
   selectedCharacter: BrowserCharacter | null
   reports: CharacterReportSummary[]
+  reportsCachedAt: number | null
   nextCursor: string | null
   hasMoreReports: boolean
   isAuthLoading: boolean

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Button } from "../components/ui/Button";
 import {
@@ -66,6 +66,7 @@ export function AnalyzePage() {
     usePageTitle("Analyze");
     const navigate = useNavigate();
     const loadMoreRef = useRef<HTMLDivElement | null>(null);
+    const [toastMessage, setToastMessage] = useState<string | null>(null);
     const {
         auth,
         characters,
@@ -86,6 +87,18 @@ export function AnalyzePage() {
         setError,
     } = useBrowserStore();
     const { setReportUrl, setReportData } = useAnalyzeStore();
+
+    useEffect(() => {
+        if (!toastMessage) {
+            return;
+        }
+
+        const timeout = window.setTimeout(() => {
+            setToastMessage(null);
+        }, 2800);
+
+        return () => window.clearTimeout(timeout);
+    }, [toastMessage]);
 
     useEffect(() => {
         let cancelled = false;
@@ -152,6 +165,7 @@ export function AnalyzePage() {
                 }
 
                 appendReports(page);
+                setToastMessage("Recent logs loaded.");
             } catch (err) {
                 if (cancelled) {
                     return;
@@ -252,6 +266,45 @@ export function AnalyzePage() {
         }
     }
 
+    async function refreshReports() {
+        if (!selectedCharacter) {
+            return;
+        }
+
+        setLoadingState("isReportsLoading", true);
+        setError(null);
+
+        try {
+            const page = await getCharacterReports(selectedCharacter.id);
+            resetReports();
+            appendReports(page);
+            setToastMessage(`${selectedCharacter.name}'s recent logs refreshed.`);
+        } catch (err) {
+            setError(
+                err instanceof Error
+                    ? err.message
+                    : "Failed to refresh character reports",
+            );
+        }
+    }
+
+    async function refreshCharacters() {
+        setLoadingState("isCharactersLoading", true);
+        setError(null);
+
+        try {
+            const nextCharacters = await getBrowserCharacters();
+            finishCharactersLoad(nextCharacters);
+            setToastMessage("Characters refreshed.");
+        } catch (err) {
+            setError(
+                err instanceof Error
+                    ? err.message
+                    : "Failed to refresh characters",
+            );
+        }
+    }
+
     function handleCharacterPick(characterId: number) {
         const character =
             characters.find((entry) => entry.id === characterId) ?? null;
@@ -321,9 +374,19 @@ export function AnalyzePage() {
 
             <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
                 <aside className="rounded-3xl border border-slate-800 bg-slate-900/80 p-6">
-                    <h2 className="text-lg font-semibold text-white">
-                        Characters
-                    </h2>
+                    <div className="flex items-center justify-between gap-3">
+                        <h2 className="text-lg font-semibold text-white">
+                            Characters
+                        </h2>
+                        <Button
+                            type="button"
+                            variant="secondary"
+                            onClick={() => void refreshCharacters()}
+                            disabled={isCharactersLoading}
+                        >
+                            {isCharactersLoading ? "SYNCING..." : "SYNC"}
+                        </Button>
+                    </div>
                     {isCharactersLoading ? (
                         <p className="mt-4 text-sm text-slate-400">
                             Loading characters...
@@ -340,7 +403,7 @@ export function AnalyzePage() {
                                     className={`w-full rounded-3xl border-2 p-5 text-left transition ${getClassBorderClasses(
                                         character.class,
                                         selectedCharacter?.id === character.id,
-                                    )}`}
+                                    )} active:scale-[0.99]`}
                                 >
                                     <p className="text-lg font-bold text-white">
                                         {character.name}
@@ -359,11 +422,23 @@ export function AnalyzePage() {
                 </aside>
 
                 <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-6">
-                    <h2 className="text-lg font-semibold text-white">
-                        {selectedCharacter
-                            ? `${selectedCharacter.name}'s recent logs`
-                            : "Select a character"}
-                    </h2>
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <h2 className="text-lg font-semibold text-white">
+                            {selectedCharacter
+                                ? `${selectedCharacter.name}'s recent logs`
+                                : "Select a character"}
+                        </h2>
+                        {selectedCharacter && (
+                            <Button
+                                type="button"
+                                variant="secondary"
+                                onClick={() => void refreshReports()}
+                                disabled={isReportsLoading}
+                            >
+                                {isReportsLoading ? "REFRESHING..." : "REFRESH"}
+                            </Button>
+                        )}
+                    </div>
 
                     {!selectedCharacter ? (
                         <p className="mt-4 text-sm text-slate-400">
@@ -436,6 +511,16 @@ export function AnalyzePage() {
                     )}
                 </div>
             </div>
+
+            {toastMessage && (
+                <div className="pointer-events-none fixed bottom-6 right-6 z-50">
+                    <div className="rounded-2xl border border-emerald-500/40 bg-emerald-950/90 px-4 py-3 shadow-2xl shadow-emerald-950/30 backdrop-blur">
+                        <p className="text-sm font-medium text-emerald-100">
+                            {toastMessage}
+                        </p>
+                    </div>
+                </div>
+            )}
         </section>
     );
 }

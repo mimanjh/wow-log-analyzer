@@ -39,7 +39,7 @@ func (s *AnalysisService) AnalyzePlayerFight(data types.PlayerFightData) (*types
 	metrics.CastsPerMin = s.calculateCastsPerMinute(data.CastEvents, duration)
 	metrics.MajorCDCount = s.calculateMajorCDCount(data.CooldownEvents)
 	metrics.MajorCDDrift = s.calculateMajorCDDrift(data.CooldownEvents, data.FightStart, data.FightEnd)
-	metrics.BuffUptime = s.calculateBuffUptime(data.BuffEvents, duration)
+	metrics.BuffUptime = s.calculateBuffUptime(data)
 	metrics.DowntimePct = s.calculateDowntimePercentage(data.DamageEvents, data.HealEvents, duration)
 
 	return metrics, nil

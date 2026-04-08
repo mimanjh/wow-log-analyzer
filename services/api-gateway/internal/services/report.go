@@ -238,8 +238,10 @@ type analysisCompareRequest struct {
 }
 
 type insightGenerationRequest struct {
-	Context insightContext  `json:"context"`
-	Metrics []insightMetric `json:"metrics"`
+	Context           insightContext     `json:"context"`
+	Metrics           []insightMetric    `json:"metrics"`
+	AbilityHighlights []insightHighlight `json:"abilityHighlights,omitempty"`
+	BuffHighlights    []insightHighlight `json:"buffHighlights,omitempty"`
 }
 
 type insightContext struct {
@@ -263,6 +265,14 @@ type insightMetric struct {
 	Percentile     float64 `json:"percentile"`
 	Confidence     string  `json:"confidence"`
 	Caution        string  `json:"caution,omitempty"`
+}
+
+type insightHighlight struct {
+	Name        string  `json:"name"`
+	PlayerValue float64 `json:"playerValue"`
+	EliteValue  float64 `json:"eliteValue"`
+	Difference  float64 `json:"difference"`
+	Unit        string  `json:"unit,omitempty"`
 }
 
 type AIInsight struct {
@@ -321,16 +331,17 @@ type reportTimelineData struct {
 }
 
 type timelineFightData struct {
-	PlayerID   int                 `json:"playerId"`
-	FightID    int                 `json:"fightId"`
-	FightStart time.Time           `json:"fightStart"`
-	FightEnd   time.Time           `json:"fightEnd"`
-	CastEvents []timelineCastEvent `json:"castEvents"`
+	PlayerID     int                   `json:"playerId"`
+	FightID      int                   `json:"fightId"`
+	FightStart   time.Time             `json:"fightStart"`
+	FightEnd     time.Time             `json:"fightEnd"`
+	CastEvents   []timelineAbilityEvent `json:"castEvents"`
+	DamageEvents []timelineAbilityEvent `json:"damageEvents"`
 }
 
-type timelineCastEvent struct {
-	Timestamp time.Time        `json:"timestamp"`
-	Ability   timelineAbility  `json:"ability"`
+type timelineAbilityEvent struct {
+	Timestamp time.Time       `json:"timestamp"`
+	Ability   timelineAbility `json:"ability"`
 }
 
 type timelineAbility struct {
@@ -554,6 +565,7 @@ func (s *ReportService) runJob(jobID string, req GenerateReportRequest) {
 	s.updateJob(jobID, ReportJobRunning, "insights", "Generating AI insights.", ReportJobProgress{Current: 5, Total: 5}, "", &response)
 	insights, err := s.fetchInsights(ctx, req, response.Comparison)
 	if err != nil {
+		fmt.Printf("AI insights unavailable for job %s: %v\n", jobID, err)
 		response.AI.Warning = "AI insights were unavailable. Deterministic metrics are still shown."
 		s.updateJob(jobID, ReportJobCompleted, "completed", "Report completed without AI insights.", ReportJobProgress{Current: 5, Total: 5}, "", &response)
 		return
@@ -816,12 +828,14 @@ func buildInsightRequest(req GenerateReportRequest, comparison ComparisonResult)
 			CohortSize:       comparison.CohortStats.SampleSize,
 		},
 		Metrics: []insightMetric{
-			{Key: "castsPerMin", Label: "Casts per Minute", HigherIsBetter: true, PlayerValue: comparison.Deltas.CastsPerMin.PlayerValue, CohortValue: comparison.Deltas.CastsPerMin.CohortValue, Difference: comparison.Deltas.CastsPerMin.Difference, Percentile: comparison.Deltas.CastsPerMin.Percentile, Confidence: comparison.Deltas.CastsPerMin.Confidence, Caution: comparison.Deltas.CastsPerMin.Caution},
-			{Key: "majorCdCount", Label: "Major Cooldown Count", HigherIsBetter: true, PlayerValue: comparison.Deltas.MajorCDCount.PlayerValue, CohortValue: comparison.Deltas.MajorCDCount.CohortValue, Difference: comparison.Deltas.MajorCDCount.Difference, Percentile: comparison.Deltas.MajorCDCount.Percentile, Confidence: comparison.Deltas.MajorCDCount.Confidence, Caution: comparison.Deltas.MajorCDCount.Caution},
-			{Key: "majorCdDrift", Label: "Major Cooldown Timing Drift", Unit: "s", HigherIsBetter: false, PlayerValue: comparison.Deltas.MajorCDDrift.PlayerValue, CohortValue: comparison.Deltas.MajorCDDrift.CohortValue, Difference: comparison.Deltas.MajorCDDrift.Difference, Percentile: comparison.Deltas.MajorCDDrift.Percentile, Confidence: comparison.Deltas.MajorCDDrift.Confidence, Caution: comparison.Deltas.MajorCDDrift.Caution},
-			{Key: "buffUptime", Label: "Buff Uptime", Unit: "%", HigherIsBetter: true, PlayerValue: comparison.Deltas.BuffUptime.PlayerValue, CohortValue: comparison.Deltas.BuffUptime.CohortValue, Difference: comparison.Deltas.BuffUptime.Difference, Percentile: comparison.Deltas.BuffUptime.Percentile, Confidence: comparison.Deltas.BuffUptime.Confidence, Caution: comparison.Deltas.BuffUptime.Caution},
-			{Key: "downtimePct", Label: "Downtime Percentage", Unit: "%", HigherIsBetter: false, PlayerValue: comparison.Deltas.DowntimePct.PlayerValue, CohortValue: comparison.Deltas.DowntimePct.CohortValue, Difference: comparison.Deltas.DowntimePct.Difference, Percentile: comparison.Deltas.DowntimePct.Percentile, Confidence: comparison.Deltas.DowntimePct.Confidence, Caution: comparison.Deltas.DowntimePct.Caution},
+			{Key: "castsPerMin", Label: "Casts per Minute", HigherIsBetter: true, PlayerValue: comparison.Deltas.CastsPerMin.PlayerValue, CohortValue: comparison.Deltas.CastsPerMin.CohortValue, Difference: comparison.Deltas.CastsPerMin.Difference, Percentile: clampPercentile(comparison.Deltas.CastsPerMin.Percentile), Confidence: comparison.Deltas.CastsPerMin.Confidence, Caution: comparison.Deltas.CastsPerMin.Caution},
+			{Key: "majorCdCount", Label: "Major Cooldown Count", HigherIsBetter: true, PlayerValue: comparison.Deltas.MajorCDCount.PlayerValue, CohortValue: comparison.Deltas.MajorCDCount.CohortValue, Difference: comparison.Deltas.MajorCDCount.Difference, Percentile: clampPercentile(comparison.Deltas.MajorCDCount.Percentile), Confidence: comparison.Deltas.MajorCDCount.Confidence, Caution: comparison.Deltas.MajorCDCount.Caution},
+			{Key: "majorCdDrift", Label: "Major Cooldown Timing Drift", Unit: "s", HigherIsBetter: false, PlayerValue: comparison.Deltas.MajorCDDrift.PlayerValue, CohortValue: comparison.Deltas.MajorCDDrift.CohortValue, Difference: comparison.Deltas.MajorCDDrift.Difference, Percentile: clampPercentile(comparison.Deltas.MajorCDDrift.Percentile), Confidence: comparison.Deltas.MajorCDDrift.Confidence, Caution: comparison.Deltas.MajorCDDrift.Caution},
+			{Key: "buffUptime", Label: "Buff Uptime", Unit: "%", HigherIsBetter: true, PlayerValue: comparison.Deltas.BuffUptime.PlayerValue, CohortValue: comparison.Deltas.BuffUptime.CohortValue, Difference: comparison.Deltas.BuffUptime.Difference, Percentile: clampPercentile(comparison.Deltas.BuffUptime.Percentile), Confidence: comparison.Deltas.BuffUptime.Confidence, Caution: comparison.Deltas.BuffUptime.Caution},
+			{Key: "downtimePct", Label: "Downtime Percentage", Unit: "%", HigherIsBetter: false, PlayerValue: comparison.Deltas.DowntimePct.PlayerValue, CohortValue: comparison.Deltas.DowntimePct.CohortValue, Difference: comparison.Deltas.DowntimePct.Difference, Percentile: clampPercentile(comparison.Deltas.DowntimePct.Percentile), Confidence: comparison.Deltas.DowntimePct.Confidence, Caution: comparison.Deltas.DowntimePct.Caution},
 		},
+		AbilityHighlights: buildAbilityHighlights(comparison.AbilityUsage, 5),
+		BuffHighlights:    buildBuffHighlights(comparison.BuffUptimes, 5),
 	}
 }
 
@@ -841,6 +855,14 @@ func buildAbilityTimelineSeries(data timelineFightData, abilityID int, label, su
 		}
 		casts = append(casts, event.Timestamp.Sub(data.FightStart).Milliseconds())
 	}
+	if len(casts) == 0 {
+		for _, event := range data.DamageEvents {
+			if event.Ability.ID != abilityID {
+				continue
+			}
+			casts = append(casts, event.Timestamp.Sub(data.FightStart).Milliseconds())
+		}
+	}
 
 	return AbilityTimelineSeries{
 		Label:     label,
@@ -856,6 +878,11 @@ func findAbilityName(data timelineFightData, abilityID int) string {
 			return event.Ability.Name
 		}
 	}
+	for _, event := range data.DamageEvents {
+		if event.Ability.ID == abilityID {
+			return event.Ability.Name
+		}
+	}
 	return ""
 }
 
@@ -866,4 +893,58 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func clampPercentile(value float64) float64 {
+	if value < 0 {
+		return 0
+	}
+	if value > 100 {
+		return 100
+	}
+	return value
+}
+
+func buildAbilityHighlights(values []AbilityUsageComparison, limit int) []insightHighlight {
+	if len(values) == 0 || limit <= 0 {
+		return nil
+	}
+
+	highlights := make([]insightHighlight, 0, limit)
+	for _, value := range values {
+		highlights = append(highlights, insightHighlight{
+			Name:        value.AbilityName,
+			PlayerValue: float64(value.PlayerCount),
+			EliteValue:  value.CohortMedianCount,
+			Difference:  value.CountDelta,
+			Unit:        "casts",
+		})
+		if len(highlights) == limit {
+			break
+		}
+	}
+
+	return highlights
+}
+
+func buildBuffHighlights(values []BuffUptimeComparison, limit int) []insightHighlight {
+	if len(values) == 0 || limit <= 0 {
+		return nil
+	}
+
+	highlights := make([]insightHighlight, 0, limit)
+	for _, value := range values {
+		highlights = append(highlights, insightHighlight{
+			Name:        value.AbilityName,
+			PlayerValue: value.PlayerUptimePct,
+			EliteValue:  value.CohortMedianUptimePct,
+			Difference:  value.UptimeDelta,
+			Unit:        "%",
+		})
+		if len(highlights) == limit {
+			break
+		}
+	}
+
+	return highlights
 }

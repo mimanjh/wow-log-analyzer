@@ -209,6 +209,22 @@ func summarizeAbilityUsage(data types.PlayerFightData) map[int]abilityUsageSumma
 		summaries[event.Ability.ID] = summary
 	}
 
+	for _, event := range data.DamageEvents {
+		if event.Ability.ID == 0 || event.Ability.Name == "" {
+			continue
+		}
+
+		summary := summaries[event.Ability.ID]
+		summary.AbilityID = event.Ability.ID
+		summary.AbilityName = event.Ability.Name
+		summary.Count++
+		if !summary.HasFirstUse || event.Timestamp.Before(data.FightStart.Add(time.Duration(summary.FirstUseSeconds*float64(time.Second)))) {
+			summary.FirstUseSeconds = event.Timestamp.Sub(data.FightStart).Seconds()
+			summary.HasFirstUse = true
+		}
+		summaries[event.Ability.ID] = summary
+	}
+
 	for abilityID, summary := range summaries {
 		summary.CastsPerMinute = float64(summary.Count) / durationMinutes
 		summaries[abilityID] = summary
