@@ -157,8 +157,10 @@ func TestAnalyzeService_ProcessIntake(t *testing.T) {
 	service := &AnalyzeService{
 		logClient: &stubLogClient{
 			fights: []FightSummary{
-				{ID: 1, Name: "Boss One", Difficulty: "Heroic", KillTime: 300, EncounterID: 101, StartTime: time.Unix(0, 0), EndTime: time.Unix(300, 0)},
-				{ID: 2, Name: "Boss Two", Difficulty: "Mythic", KillTime: 420, EncounterID: 102, StartTime: time.Unix(0, 0), EndTime: time.Unix(420, 0)},
+				{ID: 1, Name: "Boss One", Difficulty: "Heroic", Kill: true, KillTime: 300, EncounterID: 101, StartTime: time.Unix(0, 0), EndTime: time.Unix(300, 0)},
+				{ID: 2, Name: "Boss Two", Difficulty: "Mythic", Kill: true, KillTime: 420, EncounterID: 102, StartTime: time.Unix(0, 0), EndTime: time.Unix(420, 0)},
+				{ID: 3, Name: "Dungeon Boss", Difficulty: "Unknown", Kill: true, KillTime: 180, EncounterID: 103, StartTime: time.Unix(0, 0), EndTime: time.Unix(180, 0)},
+				{ID: 4, Name: "Wipe Boss", Difficulty: "Heroic", Kill: false, KillTime: 240, EncounterID: 104, StartTime: time.Unix(0, 0), EndTime: time.Unix(240, 0)},
 			},
 			characters: []CharacterSummary{
 				{ID: 1, Name: "Tester", Class: "Mage", Spec: "Fire", Role: "DPS"},
@@ -195,6 +197,9 @@ func TestAnalyzeService_ProcessIntake(t *testing.T) {
 
 		if len(resp.Fights) > 0 && resp.Fights[0].ID != 2 {
 			t.Errorf("ProcessIntake() expected preferred fight to be first, got %d", resp.Fights[0].ID)
+		}
+		if len(resp.Fights) > 1 && resp.Fights[1].ID != 1 {
+			t.Errorf("ProcessIntake() expected only successful raid fights to remain, got %#v", resp.Fights)
 		}
 	})
 

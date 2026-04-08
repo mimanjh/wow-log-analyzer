@@ -5,30 +5,226 @@ import { usePageTitle } from "../hooks/usePageTitle";
 import { Button } from "../components/ui/Button";
 import { MetricCard } from "../components/MetricCard";
 import { getReportJob } from "../lib/api";
+import type { Character, Fight, ReportJob } from "../types";
+
+const reportStages = [
+    { key: "player-data", label: "Fetch Player Data" },
+    { key: "rankings", label: "Find Ranking Cohort" },
+    { key: "cohort", label: "Load Top Ranked Fights" },
+    { key: "analyzing", label: "Run Deterministic Analysis" },
+    { key: "insights", label: "Generate Insights" },
+    { key: "completed", label: "Complete" },
+] as const;
+
+function formatKillTime(seconds: number) {
+    return `${Math.floor(seconds / 60)}:${(seconds % 60)
+        .toString()
+        .padStart(2, "0")}`;
+}
+
+function getStageLabel(stage: string) {
+    return reportStages.find((entry) => entry.key === stage)?.label ?? stage;
+}
+
+function getStageCompletionState(stage: string, status: ReportJob["status"], key: string) {
+    const stageIndex = reportStages.findIndex((entry) => entry.key === stage);
+    const keyIndex = reportStages.findIndex((entry) => entry.key === key);
+
+    if (status === "completed") {
+        return "complete";
+    }
+    if (status === "failed") {
+        if (keyIndex < stageIndex) {
+            return "complete";
+        }
+        if (key === stage) {
+            return "failed";
+        }
+        return "pending";
+    }
+    if (keyIndex < stageIndex) {
+        return "complete";
+    }
+    if (key === stage) {
+        return "active";
+    }
+    return "pending";
+}
+
+function renderSummaryCard(title: string, content: Array<{ label: string; value: string }>) {
+    return (
+        <div className="rounded-3xl border border-slate-800 bg-slate-950/80 p-6">
+            <h2 className="text-lg font-semibold text-white">{title}</h2>
+            <div className="mt-4 space-y-3">
+                {content.map((item) => (
+                    <div key={item.label}>
+                        <p className="text-sm text-slate-400">{item.label}</p>
+                        <p className="text-white">{item.value}</p>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+}
+
+function renderProgressView(reportJob: ReportJob, fight: Fight, character: Character) {
+    const progressPercent =
+        reportJob.progress.total > 0
+            ? Math.min(
+                  100,
+                  Math.round(
+                      (reportJob.progress.current / reportJob.progress.total) * 100,
+                  ),
+              )
+            : 0;
+    const isCohortStage = reportJob.stage === "cohort" && reportJob.progress.total > 0;
+
+    return (
+        <>
+            <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-8">
+                <p className="text-sm uppercase tracking-[0.25em] text-sky-400">
+                    Analysis Progress
+                </p>
+                <h1 className="mt-3 text-3xl font-semibold text-white">
+                    {reportJob.status === "failed"
+                        ? "Analysis failed"
+                        : reportJob.status === "completed"
+                          ? "Analysis complete"
+                          : "Analyzing fight"}
+                </h1>
+                <p className="mt-4 max-w-2xl text-slate-300">
+                    {reportJob.message}
+                </p>
+
+                <div className="mt-6 rounded-3xl border border-slate-800 bg-slate-950/80 p-6">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                            <p className="text-sm uppercase tracking-[0.2em] text-sky-400">
+                                {getStageLabel(reportJob.stage)}
+                            </p>
+                            <p className="mt-2 text-sm text-slate-300">
+                                Status: {reportJob.status}
+                            </p>
+                        </div>
+                        <div className="text-sm text-slate-400">
+                            {isCohortStage
+                                ? `Cohort member ${reportJob.progress.current} of ${reportJob.progress.total}`
+                                : `Step ${Math.min(
+                                      reportJob.progress.current,
+                                      reportJob.progress.total || 1,
+                                  )} of ${reportJob.progress.total || 1}`}
+                        </div>
+                    </div>
+
+                    <div className="mt-4 h-3 overflow-hidden rounded-full bg-slate-800">
+                        <div
+                            className={`h-full rounded-full transition-all ${
+                                reportJob.status === "failed"
+                                    ? "bg-rose-500"
+                                    : reportJob.status === "completed"
+                                      ? "bg-emerald-500"
+                                      : "bg-sky-500"
+                            }`}
+                            style={{ width: `${progressPercent}%` }}
+                        />
+                    </div>
+
+                    {reportJob.error && (
+                        <p className="mt-4 text-sm text-rose-400">
+                            {reportJob.error}
+                        </p>
+                    )}
+                </div>
+            </div>
+
+            <div className="grid gap-6 lg:grid-cols-2">
+                {renderSummaryCard("Fight Summary", [
+                    { label: "Encounter", value: fight.name },
+                    { label: "Difficulty", value: fight.difficulty },
+                    { label: "Result", value: fight.kill ? "Kill" : "Wipe" },
+                    { label: "Kill Time", value: formatKillTime(fight.killTime) },
+                ])}
+
+                {renderSummaryCard("Character Summary", [
+                    { label: "Name", value: character.name },
+                    {
+                        label: "Class & Spec",
+                        value: `${character.class} ${character.spec}`,
+                    },
+                    { label: "Role", value: character.role },
+                    {
+                        label: "Server",
+                        value: character.serverName || "Unknown server",
+                    },
+                ])}
+            </div>
+
+            <div className="rounded-3xl border border-slate-800 bg-slate-950/80 p-6">
+                <h2 className="text-lg font-semibold text-white">Pipeline</h2>
+                <div className="mt-4 grid gap-3 lg:grid-cols-3">
+                    {reportStages.map((step) => {
+                        const state = getStageCompletionState(
+                            reportJob.stage,
+                            reportJob.status,
+                            step.key,
+                        );
+                        const stateClasses =
+                            state === "complete"
+                                ? "border-emerald-700/60 bg-emerald-950/20 text-emerald-200"
+                                : state === "active"
+                                  ? "border-sky-500/60 bg-sky-950/20 text-sky-100"
+                                  : state === "failed"
+                                    ? "border-rose-700/60 bg-rose-950/20 text-rose-200"
+                                    : "border-slate-800 bg-slate-900/80 text-slate-400";
+
+                        return (
+                            <div
+                                key={step.key}
+                                className={`rounded-3xl border p-4 ${stateClasses}`}
+                            >
+                                <p className="text-xs uppercase tracking-[0.2em]">
+                                    {state}
+                                </p>
+                                <p className="mt-2 font-medium">{step.label}</p>
+                            </div>
+                        );
+                    })}
+                </div>
+            </div>
+
+            <div className="flex flex-col gap-3 sm:flex-row">
+                <Link to="/select">
+                    <Button variant="secondary">Back to selection</Button>
+                </Link>
+                <Link to="/analyze">
+                    <Button variant="secondary">Back to logs</Button>
+                </Link>
+            </div>
+        </>
+    );
+}
 
 export function ReportPage() {
     usePageTitle("Report");
-    const {
-        reportJob,
-        reportResult,
-        setReportJob,
-        setReportResult,
-        setError,
-    } = useAnalyzeStore();
+    const { reportJob, reportResult, setReportJob, setReportResult, setError } =
+        useAnalyzeStore();
+    const reportJobId = reportJob?.jobId;
+    const reportJobStatus = reportJob?.status;
 
     useEffect(() => {
         if (
-            !reportJob ||
-            reportJob.status === "completed" ||
-            reportJob.status === "failed"
+            !reportJobId ||
+            reportJobStatus === "completed" ||
+            reportJobStatus === "failed"
         ) {
             return;
         }
 
         let cancelled = false;
-        const intervalId = window.setInterval(async () => {
+
+        const refreshJob = async () => {
             try {
-                const nextJob = await getReportJob(reportJob.jobId);
+                const nextJob = await getReportJob(reportJobId);
                 if (cancelled) {
                     return;
                 }
@@ -51,15 +247,20 @@ export function ReportPage() {
                         : "Failed to refresh report status",
                 );
             }
-        }, 2000);
+        };
+
+        void refreshJob();
+        const intervalId = window.setInterval(() => {
+            void refreshJob();
+        }, 5000);
 
         return () => {
             cancelled = true;
             window.clearInterval(intervalId);
         };
-    }, [reportJob, setError, setReportJob, setReportResult]);
+    }, [reportJobId, reportJobStatus, setError, setReportJob, setReportResult]);
 
-    if (!reportResult) {
+    if (!reportJob && !reportResult) {
         return (
             <section className="space-y-8">
                 <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-8">
@@ -67,32 +268,11 @@ export function ReportPage() {
                         Report
                     </p>
                     <h1 className="mt-3 text-3xl font-semibold text-white">
-                        {reportJob
-                            ? "Report generation in progress"
-                            : "No analysis data available"}
+                        No analysis data available
                     </h1>
                     <p className="mt-4 max-w-2xl text-slate-300">
-                        {reportJob
-                            ? reportJob.message
-                            : "Please go back to the analyze page and select a fight and character."}
+                        Please go back to the analyze page and select a fight and character.
                     </p>
-
-                    {reportJob && (
-                        <div className="mt-6 rounded-3xl border border-slate-800 bg-slate-950/80 p-6">
-                            <p className="text-sm uppercase tracking-[0.2em] text-sky-400">
-                                {reportJob.stage}
-                            </p>
-                            <p className="mt-3 text-sm text-slate-300">
-                                Status: {reportJob.status}
-                            </p>
-                            {reportJob.error && (
-                                <p className="mt-3 text-sm text-rose-400">
-                                    {reportJob.error}
-                                </p>
-                            )}
-                        </div>
-                    )}
-
                     <div className="mt-8 flex flex-col gap-3 sm:flex-row">
                         <Link to="/analyze">
                             <Button variant="secondary">Back to analyze</Button>
@@ -106,11 +286,19 @@ export function ReportPage() {
         );
     }
 
-    const { fight, character, comparison, ai } = reportResult;
+    if (!reportResult && reportJob) {
+        return <section className="space-y-8">{renderProgressView(reportJob, reportJob.fight, reportJob.character)}</section>;
+    }
+
+    const { fight, character, comparison, ai } = reportResult!;
     const { cohortStats, deltas } = comparison;
 
     return (
         <section className="space-y-8">
+            {reportJob &&
+                reportJob.status !== "completed" &&
+                renderProgressView(reportJob, reportJob.fight, reportJob.character)}
+
             <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-8">
                 <p className="text-sm uppercase tracking-[0.25em] text-sky-400">
                     Report
@@ -125,54 +313,25 @@ export function ReportPage() {
             </div>
 
             <div className="grid gap-6 lg:grid-cols-2">
-                <div className="rounded-3xl border border-slate-800 bg-slate-950/80 p-6">
-                    <h2 className="text-lg font-semibold text-white">
-                        Fight Summary
-                    </h2>
-                    <div className="mt-4 space-y-3">
-                        <div>
-                            <p className="text-sm text-slate-400">Encounter</p>
-                            <p className="text-white">{fight.name}</p>
-                        </div>
-                        <div>
-                            <p className="text-sm text-slate-400">Difficulty</p>
-                            <p className="text-white">{fight.difficulty}</p>
-                        </div>
-                        <div>
-                            <p className="text-sm text-slate-400">Kill Time</p>
-                            <p className="text-white">
-                                {Math.floor(fight.killTime / 60)}:
-                                {(fight.killTime % 60)
-                                    .toString()
-                                    .padStart(2, "0")}
-                            </p>
-                        </div>
-                    </div>
-                </div>
+                {renderSummaryCard("Fight Summary", [
+                    { label: "Encounter", value: fight.name },
+                    { label: "Difficulty", value: fight.difficulty },
+                    { label: "Result", value: fight.kill ? "Kill" : "Wipe" },
+                    { label: "Kill Time", value: formatKillTime(fight.killTime) },
+                ])}
 
-                <div className="rounded-3xl border border-slate-800 bg-slate-950/80 p-6">
-                    <h2 className="text-lg font-semibold text-white">
-                        Character Summary
-                    </h2>
-                    <div className="mt-4 space-y-3">
-                        <div>
-                            <p className="text-sm text-slate-400">Name</p>
-                            <p className="text-white">{character.name}</p>
-                        </div>
-                        <div>
-                            <p className="text-sm text-slate-400">
-                                Class & Spec
-                            </p>
-                            <p className="text-white">
-                                {character.class} {character.spec}
-                            </p>
-                        </div>
-                        <div>
-                            <p className="text-sm text-slate-400">Role</p>
-                            <p className="text-white">{character.role}</p>
-                        </div>
-                    </div>
-                </div>
+                {renderSummaryCard("Character Summary", [
+                    { label: "Name", value: character.name },
+                    {
+                        label: "Class & Spec",
+                        value: `${character.class} ${character.spec}`,
+                    },
+                    { label: "Role", value: character.role },
+                    {
+                        label: "Server",
+                        value: character.serverName || "Unknown server",
+                    },
+                ])}
             </div>
 
             {ai.warning && (

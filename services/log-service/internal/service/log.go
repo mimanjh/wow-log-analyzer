@@ -47,3 +47,15 @@ func (s *LogService) GetRankingCandidates(fight types.FightSelection, characterC
 func (s *LogService) GetCohortMemberData(candidate types.RankingCandidate) (*types.PlayerFightData, error) {
 	return s.wclClient.GetCohortMemberData(candidate)
 }
+
+func (s *LogService) GetCurrentUser(accessToken string) (*types.UserProfile, error) {
+	return s.wclClient.GetCurrentUser(accessToken)
+}
+
+func (s *LogService) GetOwnedCharacters(accessToken string) ([]types.OwnedCharacter, error) {
+	return s.wclClient.GetOwnedCharacters(accessToken)
+}
+
+func (s *LogService) GetCharacterReports(accessToken string, characterID int, cursor string, limit int) (*types.CharacterReportsPage, error) {
+	return s.wclClient.GetCharacterReports(accessToken, characterID, cursor, limit)
+}

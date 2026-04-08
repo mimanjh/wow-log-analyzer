@@ -40,6 +40,7 @@ type FightSummary struct {
 	ID          int       `json:"id"`
 	Name        string    `json:"name"`
 	Difficulty  string    `json:"difficulty"`
+	Kill        bool      `json:"kill"`
 	KillTime    int       `json:"killTime"`
 	EncounterID int       `json:"encounterId"`
 	StartTime   time.Time `json:"startTime"`
@@ -48,11 +49,12 @@ type FightSummary struct {
 }
 
 type CharacterSummary struct {
-	ID    int    `json:"id"`
-	Name  string `json:"name"`
-	Class string `json:"class"`
-	Spec  string `json:"spec"`
-	Role  string `json:"role"`
+	ID         int    `json:"id"`
+	Name       string `json:"name"`
+	Class      string `json:"class"`
+	Spec       string `json:"spec"`
+	Role       string `json:"role"`
+	ServerName string `json:"serverName,omitempty"`
 }
 
 type LogServiceClient struct {
@@ -109,6 +111,7 @@ func (c *LogServiceClient) GetFights(reportID string) ([]FightSummary, error) {
 			ID:          nf.ID,
 			Name:        nf.Name,
 			Difficulty:  nf.Difficulty,
+			Kill:        nf.Kill,
 			KillTime:    killTime,
 			EncounterID: nf.EncounterID,
 			StartTime:   nf.StartTime,
@@ -213,6 +216,7 @@ func (s *AnalyzeService) ProcessIntake(req AnalyzeIntakeRequest) (AnalyzeIntakeR
 		return AnalyzeIntakeResponse{}, fmt.Errorf("failed to retrieve fights: %w", err)
 	}
 
+	fights = filterRelevantFights(fights)
 	fights = prioritizeFight(fights, validation.PreferredFightID)
 
 	characters := []CharacterSummary{}
@@ -298,4 +302,22 @@ func prioritizeFight(fights []FightSummary, preferredFightID int) []FightSummary
 	})
 
 	return prioritized
+}
+
+func filterRelevantFights(fights []FightSummary) []FightSummary {
+	filtered := make([]FightSummary, 0, len(fights))
+	for _, fight := range fights {
+		if fight.EncounterID == 0 {
+			continue
+		}
+		if !fight.Kill {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(fight.Difficulty), "Unknown") {
+			continue
+		}
+		filtered = append(filtered, fight)
+	}
+
+	return filtered
 }

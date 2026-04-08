@@ -15,7 +15,9 @@ func main() {
 	mux := http.NewServeMux()
 	analyzeService := services.NewAnalyzeService(cfg.LogServiceURL)
 	reportService := services.NewReportService(cfg.LogServiceURL, cfg.AnalysisServiceURL, cfg.AIServiceURL)
-	handlers.RegisterRoutes(mux, analyzeService, reportService)
+	authService := services.NewAuthService(cfg)
+	browserService := services.NewBrowserService(cfg.LogServiceURL)
+	handlers.RegisterRoutes(mux, cfg, analyzeService, reportService, authService, browserService)
 
 	serverAddr := fmt.Sprintf(":%s", cfg.Port)
 	log.Printf("api-gateway starting on %s", serverAddr)

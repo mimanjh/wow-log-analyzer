@@ -1,6 +1,65 @@
-import { Link, Outlet } from "react-router-dom";
+import { useEffect } from "react";
+import { Link, Outlet, useNavigate } from "react-router-dom";
+import { getAuthStatus, logout } from "../../lib/api";
+import { useBrowserStore } from "../../stores/useBrowserStore";
+import { Button } from "../ui/Button";
 
 export function AppShell() {
+    const navigate = useNavigate();
+    const {
+        auth,
+        isAuthLoading,
+        setAuth,
+        setLoadingState,
+        setError,
+        reset,
+    } = useBrowserStore();
+
+    useEffect(() => {
+        let cancelled = false;
+
+        async function syncAuth() {
+            try {
+                setLoadingState("isAuthLoading", true);
+                const status = await getAuthStatus();
+                if (cancelled) {
+                    return;
+                }
+
+                setAuth(status);
+            } catch (err) {
+                if (cancelled) {
+                    return;
+                }
+
+                setError(
+                    err instanceof Error
+                        ? err.message
+                        : "Failed to load authentication state",
+                );
+            } finally {
+                if (!cancelled) {
+                    setLoadingState("isAuthLoading", false);
+                }
+            }
+        }
+
+        void syncAuth();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [setAuth, setError, setLoadingState]);
+
+    async function handleLogout() {
+        try {
+            await logout();
+        } finally {
+            reset();
+            navigate("/");
+        }
+    }
+
     return (
         <div className="min-h-screen bg-slate-950 text-slate-100">
             <header className="border-b border-slate-800 bg-slate-900/90">
@@ -16,26 +75,54 @@ export function AppShell() {
                             Compare your fight against a high-performing cohort.
                         </p>
                     </div>
-                    <nav className="flex flex-wrap gap-3">
-                        <Link
-                            to="/"
-                            className="rounded-md bg-slate-800 px-4 py-2 text-sm font-medium text-slate-100 hover:bg-slate-700"
-                        >
-                            Home
-                        </Link>
-                        <Link
-                            to="/analyze"
-                            className="rounded-md bg-slate-800 px-4 py-2 text-sm font-medium text-slate-100 hover:bg-slate-700"
-                        >
-                            Analyze
-                        </Link>
-                        <Link
-                            to="/report"
-                            className="rounded-md bg-slate-800 px-4 py-2 text-sm font-medium text-slate-100 hover:bg-slate-700"
-                        >
-                            Report
-                        </Link>
-                    </nav>
+                    <div className="flex flex-wrap items-center gap-3">
+                        <nav className="flex flex-wrap gap-3">
+                            <Link
+                                to="/"
+                                className="rounded-md bg-slate-800 px-4 py-2 text-sm font-medium text-slate-100 hover:bg-slate-700"
+                            >
+                                Home
+                            </Link>
+                            <Link
+                                to="/analyze"
+                                className="rounded-md bg-slate-800 px-4 py-2 text-sm font-medium text-slate-100 hover:bg-slate-700"
+                            >
+                                Analyze
+                            </Link>
+                            <Link
+                                to="/report"
+                                className="rounded-md bg-slate-800 px-4 py-2 text-sm font-medium text-slate-100 hover:bg-slate-700"
+                            >
+                                Report
+                            </Link>
+                        </nav>
+
+                        {auth?.authenticated ? (
+                            <div className="flex items-center gap-3">
+                                {auth.user?.name && (
+                                    <span className="text-sm text-slate-300">
+                                        {auth.user.name}
+                                    </span>
+                                )}
+                                <Button
+                                    type="button"
+                                    variant="secondary"
+                                    onClick={handleLogout}
+                                >
+                                    Log out
+                                </Button>
+                            </div>
+                        ) : (
+                            <a href="/api/auth/login">
+                                <Button
+                                    type="button"
+                                    disabled={isAuthLoading}
+                                >
+                                    {isAuthLoading ? "Checking..." : "Log in"}
+                                </Button>
+                            </a>
+                        )}
+                    </div>
                 </div>
             </header>
 

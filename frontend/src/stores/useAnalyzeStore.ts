@@ -28,7 +28,7 @@ export const useAnalyzeStore = create<AnalyzeState>()(
           reportUrl,
         }),
 
-      setReportData: ({ reportId, preferredFightId, fights, characters }) => {
+        setReportData: ({ reportId, preferredFightId, fights, characters }) => {
         const initialFight =
           fights.find((fight) => fight.id === preferredFightId) ?? fights[0] ?? null
 
@@ -37,7 +37,7 @@ export const useAnalyzeStore = create<AnalyzeState>()(
           preferredFightId: preferredFightId ?? null,
           fights,
           characters,
-          charactersFightId: initialFight?.id ?? null,
+          charactersFightId: characters.length > 0 ? initialFight?.id ?? null : null,
           selectedFight: initialFight,
           selectedCharacter: null,
           reportJob: null,

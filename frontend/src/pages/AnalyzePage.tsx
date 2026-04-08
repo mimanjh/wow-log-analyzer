@@ -1,97 +1,277 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useAnalyzeStore } from "../stores/useAnalyzeStore";
-import { usePageTitle } from "../hooks/usePageTitle";
 import { Button } from "../components/ui/Button";
-import { createReportJob, getCharacters } from "../lib/api";
+import {
+    analyzeReport,
+    getAuthStatus,
+    getBrowserCharacters,
+    getCharacterReports,
+} from "../lib/api";
+import { usePageTitle } from "../hooks/usePageTitle";
+import { useAnalyzeStore } from "../stores/useAnalyzeStore";
+import { useBrowserStore } from "../stores/useBrowserStore";
+
+function getClassBorderClasses(characterClass: string, selected: boolean) {
+    const palette: Record<string, string> = {
+        "Death Knight": selected
+            ? "border-red-500 bg-red-950/20"
+            : "border-red-700/60 bg-slate-950/80 hover:border-red-500/70",
+        "Demon Hunter": selected
+            ? "border-violet-500 bg-violet-950/20"
+            : "border-violet-700/60 bg-slate-950/80 hover:border-violet-500/70",
+        Druid: selected
+            ? "border-orange-500 bg-orange-950/20"
+            : "border-orange-700/60 bg-slate-950/80 hover:border-orange-500/70",
+        Evoker: selected
+            ? "border-emerald-500 bg-emerald-950/20"
+            : "border-emerald-700/60 bg-slate-950/80 hover:border-emerald-500/70",
+        Hunter: selected
+            ? "border-lime-500 bg-lime-950/20"
+            : "border-lime-700/60 bg-slate-950/80 hover:border-lime-500/70",
+        Mage: selected
+            ? "border-sky-400 bg-sky-950/20"
+            : "border-sky-700/60 bg-slate-950/80 hover:border-sky-400/70",
+        Monk: selected
+            ? "border-teal-500 bg-teal-950/20"
+            : "border-teal-700/60 bg-slate-950/80 hover:border-teal-500/70",
+        Paladin: selected
+            ? "border-pink-400 bg-pink-950/20"
+            : "border-pink-700/60 bg-slate-950/80 hover:border-pink-400/70",
+        Priest: selected
+            ? "border-stone-300 bg-stone-950/20"
+            : "border-stone-600/70 bg-slate-950/80 hover:border-stone-300/70",
+        Rogue: selected
+            ? "border-amber-400 bg-amber-950/20"
+            : "border-amber-700/60 bg-slate-950/80 hover:border-amber-400/70",
+        Shaman: selected
+            ? "border-blue-500 bg-blue-950/20"
+            : "border-blue-700/60 bg-slate-950/80 hover:border-blue-500/70",
+        Warlock: selected
+            ? "border-fuchsia-500 bg-fuchsia-950/20"
+            : "border-fuchsia-700/60 bg-slate-950/80 hover:border-fuchsia-500/70",
+        Warrior: selected
+            ? "border-yellow-700 bg-yellow-950/20"
+            : "border-yellow-800/80 bg-slate-950/80 hover:border-yellow-700/80",
+    };
+
+    return (
+        palette[characterClass] ??
+        (selected
+            ? "border-sky-500 bg-sky-950/20"
+            : "border-slate-700 bg-slate-950/80 hover:border-slate-500")
+    );
+}
 
 export function AnalyzePage() {
     usePageTitle("Analyze");
     const navigate = useNavigate();
+    const loadMoreRef = useRef<HTMLDivElement | null>(null);
     const {
-        reportUrl,
-        reportId,
-        fights,
+        auth,
         characters,
-        charactersFightId,
-        selectedFight,
         selectedCharacter,
-        isLoading,
+        reports,
+        nextCursor,
+        hasMoreReports,
+        isAuthLoading,
+        isCharactersLoading,
+        isReportsLoading,
         error,
-        setCharactersForFight,
-        setSelectedFight,
+        setAuth,
+        finishCharactersLoad,
         setSelectedCharacter,
-        setReportJob,
-        setReportResult,
-        setLoading,
+        resetReports,
+        appendReports,
+        setLoadingState,
         setError,
-    } = useAnalyzeStore();
+    } = useBrowserStore();
+    const { setReportUrl, setReportData } = useAnalyzeStore();
 
     useEffect(() => {
+        let cancelled = false;
+        async function load() {
+            try {
+                let status = auth;
+                if (status === null) {
+                    setLoadingState("isAuthLoading", true);
+                    status = await getAuthStatus();
+                    if (cancelled) {
+                        return;
+                    }
+
+                    setAuth(status);
+                    setLoadingState("isAuthLoading", false);
+                }
+
+                if (!status.authenticated) {
+                    finishCharactersLoad([]);
+                    return;
+                }
+
+                setLoadingState("isCharactersLoading", true);
+                const nextCharacters = await getBrowserCharacters();
+                if (cancelled) {
+                    return;
+                }
+
+                finishCharactersLoad(nextCharacters);
+            } catch (err) {
+                if (cancelled) {
+                    return;
+                }
+
+                setError(
+                    err instanceof Error
+                        ? err.message
+                        : "Failed to load Warcraft Logs browser state",
+                );
+            }
+        }
+
+        void load();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [auth, finishCharactersLoad, setAuth, setError, setLoadingState]);
+
+    useEffect(() => {
+        if (!selectedCharacter || reports.length > 0) {
+            return;
+        }
+
+        const selectedCharacterId = selectedCharacter.id;
+        let cancelled = false;
+
+        async function loadInitialReports() {
+            try {
+                setLoadingState("isReportsLoading", true);
+                const page = await getCharacterReports(selectedCharacterId);
+                if (cancelled) {
+                    return;
+                }
+
+                appendReports(page);
+            } catch (err) {
+                if (cancelled) {
+                    return;
+                }
+
+                setError(
+                    err instanceof Error
+                        ? err.message
+                        : "Failed to load character reports",
+                );
+            }
+        }
+
+        void loadInitialReports();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [
+        appendReports,
+        reports.length,
+        selectedCharacter,
+        setError,
+        setLoadingState,
+    ]);
+
+    useEffect(() => {
+        const node = loadMoreRef.current;
         if (
-            !reportId ||
-            !selectedFight ||
-            isLoading ||
-            charactersFightId === selectedFight.id
+            !node ||
+            !selectedCharacter ||
+            !hasMoreReports ||
+            isReportsLoading
         ) {
             return;
         }
 
-        setLoading(true);
-        setError(null);
+        const selectedCharacterId = selectedCharacter.id;
+        const observer = new IntersectionObserver(
+            (entries) => {
+                const entry = entries[0];
+                if (!entry?.isIntersecting) {
+                    return;
+                }
 
-        getCharacters(reportId, selectedFight.id)
-            .then((nextCharacters) => {
-                setCharactersForFight(selectedFight.id, nextCharacters);
-                setSelectedCharacter(null);
-            })
-            .catch((err) => {
-                setError(
-                    err instanceof Error
-                        ? err.message
-                        : "Failed to load characters",
-                );
-            });
+                void (async () => {
+                    try {
+                        setLoadingState("isReportsLoading", true);
+                        const page = await getCharacterReports(
+                            selectedCharacterId,
+                            nextCursor,
+                        );
+                        appendReports(page);
+                    } catch (err) {
+                        setError(
+                            err instanceof Error
+                                ? err.message
+                                : "Failed to load more reports",
+                        );
+                    }
+                })();
+            },
+            {
+                rootMargin: "200px",
+            },
+        );
+
+        observer.observe(node);
+        return () => observer.disconnect();
     }, [
-        reportId,
-        selectedFight,
-        charactersFightId,
-        isLoading,
-        setCharactersForFight,
-        setSelectedCharacter,
-        setLoading,
+        appendReports,
+        hasMoreReports,
+        isReportsLoading,
+        nextCursor,
+        selectedCharacter,
         setError,
+        setLoadingState,
     ]);
 
-    async function handleAnalyzeClick() {
-        if (!reportId || !selectedFight || !selectedCharacter) {
-            return;
-        }
-
-        setLoading(true);
+    async function handleSelectReport(reportCode: string) {
+        const reportUrl = `https://www.warcraftlogs.com/reports/${reportCode}`;
+        setReportUrl(reportUrl);
+        setLoadingState("isReportsLoading", true);
         setError(null);
 
         try {
-            setReportResult(null);
-            const job = await createReportJob(
-                reportId,
-                selectedFight,
-                selectedCharacter,
-            );
-            setReportJob(job);
-            navigate("/report");
+            const data = await analyzeReport(reportUrl);
+            setReportData(data);
+            navigate("/select");
         } catch (err) {
             setError(
                 err instanceof Error
                     ? err.message
-                    : "Failed to generate report",
+                    : "Failed to load report details",
             );
         } finally {
-            setLoading(false);
+            setLoadingState("isReportsLoading", false);
         }
     }
 
-    if (!reportUrl) {
+    function handleCharacterPick(characterId: number) {
+        const character =
+            characters.find((entry) => entry.id === characterId) ?? null;
+        setSelectedCharacter(character);
+        resetReports();
+    }
+
+    if (isAuthLoading) {
+        return (
+            <section className="space-y-8">
+                <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-8">
+                    <p className="text-sm text-slate-400">
+                        Checking Warcraft Logs session...
+                    </p>
+                </div>
+            </section>
+        );
+    }
+
+    if (!auth?.authenticated) {
         return (
             <section className="space-y-8">
                 <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-8">
@@ -99,15 +279,18 @@ export function AnalyzePage() {
                         Analyze
                     </p>
                     <h1 className="mt-3 text-3xl font-semibold text-white">
-                        No report URL provided
+                        Login required
                     </h1>
-                    <p className="mt-4 text-slate-300">
-                        Please go back to the home page and paste a Warcraft
-                        Logs URL.
+                    <p className="mt-4 max-w-2xl text-slate-300">
+                        Sign in with Warcraft Logs first so the app can load
+                        your available characters and recent reports.
                     </p>
-                    <div className="mt-8">
+                    <div className="mt-8 flex gap-3">
+                        <a href="/api/auth/login">
+                            <Button>Log in with Warcraft Logs</Button>
+                        </a>
                         <Link to="/">
-                            <Button>Back to home</Button>
+                            <Button variant="secondary">Back to home</Button>
                         </Link>
                     </div>
                 </div>
@@ -122,128 +305,134 @@ export function AnalyzePage() {
                     Analyze
                 </p>
                 <h1 className="mt-3 text-3xl font-semibold text-white">
-                    Fight and character selection
+                    Browse your character logs
                 </h1>
                 <p className="mt-4 max-w-2xl text-slate-300">
-                    Select a fight and character from your report to analyze.
+                    Select a character, then scroll through recent reports. The
+                    app loads the next 10 reports as you continue down the list.
                 </p>
+            </div>
 
-                <div className="mt-8 rounded-3xl border border-slate-800 bg-slate-950/80 p-6">
-                    <p className="text-sm text-slate-400">Selected report</p>
-                    <p className="mt-2 rounded-2xl bg-slate-900 px-4 py-3 text-sm text-slate-100">
-                        {reportUrl}
-                    </p>
+            {error && (
+                <div className="rounded-3xl border border-rose-800 bg-rose-950/20 p-6">
+                    <p className="text-sm text-rose-400">{error}</p>
                 </div>
+            )}
 
-                {error && (
-                    <div className="mt-6 rounded-3xl border border-rose-800 bg-rose-950/20 p-6">
-                        <p className="text-sm text-rose-400">
-                            Error loading report data: {error}
+            <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
+                <aside className="rounded-3xl border border-slate-800 bg-slate-900/80 p-6">
+                    <h2 className="text-lg font-semibold text-white">
+                        Characters
+                    </h2>
+                    {isCharactersLoading ? (
+                        <p className="mt-4 text-sm text-slate-400">
+                            Loading characters...
                         </p>
-                    </div>
-                )}
-
-                {isLoading && (
-                    <div className="mt-6 rounded-3xl border border-slate-800 bg-slate-950/80 p-6">
-                        <p className="text-sm text-slate-400">
-                            {reportId
-                                ? selectedFight &&
-                                  charactersFightId !== selectedFight.id
-                                    ? "Loading characters..."
-                                    : "Generating report..."
-                                : "Loading report data..."}
-                        </p>
-                    </div>
-                )}
-
-                {reportId && !isLoading && !error && (
-                    <>
-                        <div className="mt-6 rounded-3xl border border-slate-800 bg-slate-950/80 p-6">
-                            <h2 className="text-lg font-semibold text-white">
-                                Select a Fight
-                            </h2>
-                            <div className="mt-4 space-y-2">
-                                {fights.map((fight) => (
-                                    <label
-                                        key={fight.id}
-                                        className="flex items-center space-x-3"
-                                    >
-                                        <input
-                                            type="radio"
-                                            name="fight"
-                                            value={fight.id}
-                                            checked={
-                                                selectedFight?.id === fight.id
-                                            }
-                                            onChange={() =>
-                                                setSelectedFight(fight)
-                                            }
-                                            className="text-sky-400 focus:ring-sky-500"
-                                        />
-                                        <span className="text-slate-200">
-                                            {fight.name} ({fight.difficulty}) -{" "}
-                                            {Math.floor(fight.killTime / 60)}:
-                                            {(fight.killTime % 60)
-                                                .toString()
-                                                .padStart(2, "0")}
-                                        </span>
-                                    </label>
-                                ))}
-                            </div>
+                    ) : (
+                        <div className="mt-4 space-y-3">
+                            {characters.map((character) => (
+                                <button
+                                    key={`${character.id}-${character.serverSlug ?? character.serverName}`}
+                                    type="button"
+                                    onClick={() =>
+                                        handleCharacterPick(character.id)
+                                    }
+                                    className={`w-full rounded-3xl border-2 p-5 text-left transition ${getClassBorderClasses(
+                                        character.class,
+                                        selectedCharacter?.id === character.id,
+                                    )}`}
+                                >
+                                    <p className="text-lg font-bold text-white">
+                                        {character.name}
+                                    </p>
+                                    <p className="mt-1 text-xs text-slate-400">
+                                        {character.serverName} |{" "}
+                                        {character.serverRegion}
+                                    </p>
+                                    <p className="mt-2 text-sm text-slate-200">
+                                        {character.class}
+                                    </p>
+                                </button>
+                            ))}
                         </div>
+                    )}
+                </aside>
 
-                        {selectedFight && (
-                            <div className="mt-6 rounded-3xl border border-slate-800 bg-slate-950/80 p-6">
-                                <h2 className="text-lg font-semibold text-white">
-                                    Select a Character
-                                </h2>
-                                <div className="mt-4 space-y-2">
-                                    {characters.map((character) => (
-                                        <label
-                                            key={character.id}
-                                            className="flex items-center space-x-3"
+                <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-6">
+                    <h2 className="text-lg font-semibold text-white">
+                        {selectedCharacter
+                            ? `${selectedCharacter.name}'s recent logs`
+                            : "Select a character"}
+                    </h2>
+
+                    {!selectedCharacter ? (
+                        <p className="mt-4 text-sm text-slate-400">
+                            Choose a character from the left to start loading
+                            reports.
+                        </p>
+                    ) : (
+                        <div className="mt-6 space-y-4">
+                            {reports.map((report) => (
+                                <article
+                                    key={report.code}
+                                    className="rounded-3xl border border-slate-800 bg-slate-950/80 p-5"
+                                >
+                                    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                                        <div>
+                                            <h3 className="text-lg font-semibold text-white">
+                                                {report.title}
+                                            </h3>
+                                            <p className="mt-2 text-sm text-slate-300">
+                                                {report.zoneName ||
+                                                    "Unknown zone"}
+                                            </p>
+                                            {report.bossNames &&
+                                                report.bossNames.length > 0 && (
+                                                    <p className="mt-2 text-sm text-slate-400">
+                                                        {report.bossNames.join(
+                                                            ", ",
+                                                        )}
+                                                    </p>
+                                                )}
+                                            <p className="mt-2 text-xs text-slate-400">
+                                                {new Date(
+                                                    report.startTime,
+                                                ).toLocaleString()}
+                                            </p>
+                                        </div>
+                                        <Button
+                                            type="button"
+                                            onClick={() =>
+                                                handleSelectReport(report.code)
+                                            }
                                         >
-                                            <input
-                                                type="radio"
-                                                name="character"
-                                                value={character.id}
-                                                checked={
-                                                    selectedCharacter?.id ===
-                                                    character.id
-                                                }
-                                                onChange={() =>
-                                                    setSelectedCharacter(
-                                                        character,
-                                                    )
-                                                }
-                                                className="text-sky-400 focus:ring-sky-500"
-                                            />
-                                            <span className="text-slate-200">
-                                                {character.name} -{" "}
-                                                {character.class}{" "}
-                                                {character.spec} (
-                                                {character.role})
-                                            </span>
-                                        </label>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
-                    </>
-                )}
+                                            SELECT
+                                        </Button>
+                                    </div>
+                                </article>
+                            ))}
 
-                <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-                    <Link to="/">
-                        <Button variant="secondary">Back to home</Button>
-                    </Link>
-                    {selectedFight && selectedCharacter && (
-                        <Button
-                            type="button"
-                            disabled={isLoading}
-                            onClick={handleAnalyzeClick}
-                        >
-                            {isLoading ? "Generating report..." : "Analyze fight"}
-                        </Button>
+                            {isReportsLoading && (
+                                <p className="text-sm text-slate-400">
+                                    Loading reports...
+                                </p>
+                            )}
+
+                            {!isReportsLoading && reports.length === 0 && (
+                                <p className="text-sm text-slate-400">
+                                    No recent reports were found for this
+                                    character.
+                                </p>
+                            )}
+
+                            {hasMoreReports && (
+                                <div
+                                    ref={loadMoreRef}
+                                    className="h-6 w-full"
+                                    aria-hidden="true"
+                                />
+                            )}
+                        </div>
                     )}
                 </div>
             </div>

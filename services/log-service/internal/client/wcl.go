@@ -30,6 +30,9 @@ type WCLClient interface {
 	GetPlayerFightData(reportID string, fight types.FightSelection, characterID int) (*types.PlayerFightData, error)
 	GetRankingCandidates(fight types.FightSelection, characterClass, characterSpec string, limit int) ([]types.RankingCandidate, error)
 	GetCohortMemberData(candidate types.RankingCandidate) (*types.PlayerFightData, error)
+	GetCurrentUser(accessToken string) (*types.UserProfile, error)
+	GetOwnedCharacters(accessToken string) ([]types.OwnedCharacter, error)
+	GetCharacterReports(accessToken string, characterID int, cursor string, limit int) (*types.CharacterReportsPage, error)
 }
 
 // WCLHTTPClient implements WCLClient using HTTP requests
@@ -92,7 +95,8 @@ func (c *WCLHTTPClient) GetFights(reportID string) ([]types.NormalizedFight, err
 		query {
 			reportData {
 				report(code: "%s") {
-					fights {
+					startTime
+					fights(killType: Encounters) {
 						id
 						name
 						startTime
@@ -110,7 +114,8 @@ func (c *WCLHTTPClient) GetFights(reportID string) ([]types.NormalizedFight, err
 		Data struct {
 			ReportData struct {
 				Report struct {
-					Fights []WCLFight `json:"fights"`
+					StartTime int64      `json:"startTime"`
+					Fights    []WCLFight `json:"fights"`
 				} `json:"report"`
 			} `json:"reportData"`
 		} `json:"data"`
@@ -120,31 +125,14 @@ func (c *WCLHTTPClient) GetFights(reportID string) ([]types.NormalizedFight, err
 		return nil, fmt.Errorf("failed to fetch fights: %w", err)
 	}
 
-	return c.normalizeFights(response.Data.ReportData.Report.Fights), nil
+	return c.normalizeFights(
+		response.Data.ReportData.Report.StartTime,
+		response.Data.ReportData.Report.Fights,
+	), nil
 }
 
 func (c *WCLHTTPClient) GetCharacters(reportID string, fightID int) ([]types.CharacterOption, error) {
-	actors, err := c.getPlayerActors(reportID)
-	if err != nil {
-		return nil, err
-	}
-
-	characters := make([]types.CharacterOption, 0, len(actors))
-	for _, actor := range actors {
-		characters = append(characters, types.CharacterOption{
-			ID:    actor.ID,
-			Name:  actor.Name,
-			Class: normalizeClass(actor.Type),
-			Spec:  normalizeSpec(actor.SubType),
-			Role:  inferRole(actor.SubType),
-		})
-	}
-
-	sort.Slice(characters, func(i, j int) bool {
-		return characters[i].Name < characters[j].Name
-	})
-
-	return characters, nil
+	return c.getFightCharacters(reportID, fightID)
 }
 
 func (c *WCLHTTPClient) GetComparisonData(reportID string, fight types.FightSelection, characterID int) (*types.ComparisonDataResponse, error) {
@@ -155,24 +143,29 @@ func (c *WCLHTTPClient) GetComparisonData(reportID string, fight types.FightSele
 		return nil, fmt.Errorf("failed to fetch player fight data: %w", err)
 	}
 
-	actors, err := c.getPlayerActors(reportID)
+	characters, err := c.getFightCharacters(reportID, fight.ID)
 	if err != nil {
 		return nil, err
 	}
 
-	var selectedActor *WCLActor
-	for _, actor := range actors {
-		if actor.ID == characterID {
-			actorCopy := actor
-			selectedActor = &actorCopy
+	var selectedCharacter *types.CharacterOption
+	for _, character := range characters {
+		if character.ID == characterID {
+			characterCopy := character
+			selectedCharacter = &characterCopy
 			break
 		}
 	}
-	if selectedActor == nil {
+	if selectedCharacter == nil {
 		return nil, fmt.Errorf("character %d not found in report", characterID)
 	}
 
-	candidates, err := c.GetRankingCandidates(fight, selectedActor.Type, selectedActor.SubType, 10)
+	candidates, err := c.GetRankingCandidates(
+		fight,
+		selectedCharacter.Class,
+		selectedCharacter.Spec,
+		10,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch ranking candidates: %w", err)
 	}
@@ -205,25 +198,8 @@ func (c *WCLHTTPClient) GetComparisonData(reportID string, fight types.FightSele
 }
 
 func (c *WCLHTTPClient) GetPlayerFightData(reportID string, fight types.FightSelection, characterID int) (*types.PlayerFightData, error) {
-	actors, err := c.getPlayerActors(reportID)
-	if err != nil {
-		return nil, err
-	}
-
-	var selectedActor *WCLActor
-	for _, actor := range actors {
-		if actor.ID == characterID {
-			actorCopy := actor
-			selectedActor = &actorCopy
-			break
-		}
-	}
-	if selectedActor == nil {
-		return nil, fmt.Errorf("character %d not found in report", characterID)
-	}
-
 	selectedFight := normalizedFightFromSelection(fight)
-	playerData, err := c.fetchPlayerFightData(reportID, selectedFight, *selectedActor)
+	playerData, err := c.fetchPlayerFightData(reportID, selectedFight, characterID)
 	if err != nil {
 		return nil, err
 	}
@@ -294,6 +270,14 @@ func (c *WCLHTTPClient) GetCohortMemberData(candidate types.RankingCandidate) (*
 
 // makeGraphQLRequest performs a GraphQL request to the WCL API
 func (c *WCLHTTPClient) makeGraphQLRequest(query string, response interface{}) error {
+	return c.makeAuthorizedGraphQLRequest(c.config.BaseURL+"/client", "", query, response)
+}
+
+func (c *WCLHTTPClient) makeUserGraphQLRequest(accessToken, query string, response interface{}) error {
+	return c.makeAuthorizedGraphQLRequest(c.config.BaseURL+"/user", accessToken, query, response)
+}
+
+func (c *WCLHTTPClient) makeAuthorizedGraphQLRequest(endpoint, accessToken, query string, response interface{}) error {
 	requestBody := map[string]string{
 		"query": query,
 	}
@@ -303,13 +287,15 @@ func (c *WCLHTTPClient) makeGraphQLRequest(query string, response interface{}) e
 		return fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", c.config.BaseURL+"/client", bytes.NewBuffer(jsonData))
+	req, err := http.NewRequest("POST", endpoint, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	if c.config.ClientID != "" && c.config.ClientSecret != "" {
+	if accessToken != "" {
+		req.Header.Set("Authorization", "Bearer "+accessToken)
+	} else if c.config.ClientID != "" && c.config.ClientSecret != "" {
 		token, err := c.getAccessToken()
 		if err != nil {
 			return err
@@ -333,6 +319,210 @@ func (c *WCLHTTPClient) makeGraphQLRequest(query string, response interface{}) e
 	}
 
 	return nil
+}
+
+func (c *WCLHTTPClient) GetCurrentUser(accessToken string) (*types.UserProfile, error) {
+	query := `
+		query {
+			userData {
+				currentUser {
+					id
+					name
+					avatar
+					battleTag
+				}
+			}
+		}`
+
+	var response struct {
+		Data struct {
+			UserData struct {
+				CurrentUser WCLCurrentUser `json:"currentUser"`
+			} `json:"userData"`
+		} `json:"data"`
+	}
+
+	if err := c.makeUserGraphQLRequest(accessToken, query, &response); err != nil {
+		return nil, fmt.Errorf("failed to fetch current user: %w", err)
+	}
+
+	user := response.Data.UserData.CurrentUser
+	return &types.UserProfile{
+		ID:        user.ID,
+		Name:      user.Name,
+		Avatar:    user.Avatar,
+		BattleTag: user.BattleTag,
+	}, nil
+}
+
+func (c *WCLHTTPClient) GetOwnedCharacters(accessToken string) ([]types.OwnedCharacter, error) {
+	query := `
+		query {
+			userData {
+				currentUser {
+					characters {
+						canonicalID
+						name
+						classID
+						server {
+							name
+							slug
+							region {
+								name
+							}
+						}
+						recentReports(limit: 1, page: 1) {
+							data {
+								rankedCharacters {
+									canonicalID
+									name
+									classID
+									server {
+										name
+										slug
+										region {
+											name
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}`
+
+	var response struct {
+		Data struct {
+			UserData struct {
+				CurrentUser WCLCurrentUser `json:"currentUser"`
+			} `json:"userData"`
+		} `json:"data"`
+	}
+
+	if err := c.makeUserGraphQLRequest(accessToken, query, &response); err != nil {
+		return nil, fmt.Errorf("failed to fetch owned characters: %w", err)
+	}
+
+	rawCharacters := response.Data.UserData.CurrentUser.Characters
+	characters := make([]types.OwnedCharacter, 0, len(rawCharacters))
+	for _, character := range rawCharacters {
+		classID := character.ClassID
+		if derivedClassID, ok := deriveCharacterClassID(character); ok {
+			classID = derivedClassID
+		}
+
+		characters = append(characters, types.OwnedCharacter{
+			ID:           character.CanonicalID,
+			Name:         character.Name,
+			Class:        classNameFromID(classID),
+			ServerName:   character.Server.Name,
+			ServerRegion: character.Server.Region.Name,
+			ServerSlug:   character.Server.Slug,
+		})
+	}
+
+	sort.Slice(characters, func(i, j int) bool {
+		if characters[i].Name == characters[j].Name {
+			return characters[i].ServerName < characters[j].ServerName
+		}
+		return characters[i].Name < characters[j].Name
+	})
+
+	return characters, nil
+}
+
+func (c *WCLHTTPClient) GetCharacterReports(accessToken string, characterID int, cursor string, limit int) (*types.CharacterReportsPage, error) {
+	if characterID == 0 {
+		return nil, fmt.Errorf("character id is required")
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+
+	page, offset := parseCharacterReportsCursor(cursor)
+	rawLimit := limit * 3
+	if rawLimit < 25 {
+		rawLimit = 25
+	}
+	if rawLimit > 50 {
+		rawLimit = 50
+	}
+	cutoff := time.Now().AddDate(0, 0, -30)
+
+	collected := make([]types.CharacterReportSummary, 0, limit)
+	currentPage := page
+	currentOffset := offset
+
+	for len(collected) < limit {
+		character, err := c.getCurrentUserCharacterReports(accessToken, characterID, currentPage, rawLimit)
+		if err != nil {
+			return nil, err
+		}
+
+		matchingReports := make([]WCLReportSummary, 0, len(character.RecentReports.Data))
+		reachedCutoff := false
+		for _, report := range character.RecentReports.Data {
+			reportStart := time.UnixMilli(report.StartTime)
+			if reportStart.Before(cutoff) {
+				reachedCutoff = true
+				break
+			}
+			if !isAllowedRaidReportTitle(report.Title) {
+				continue
+			}
+			if !hasSuccessfulBossKill(report.Fights) {
+				continue
+			}
+			matchingReports = append(matchingReports, report)
+		}
+
+		for index := currentOffset; index < len(matchingReports); index++ {
+			report := matchingReports[index]
+
+			zoneName := ""
+			if report.Zone != nil {
+				zoneName = report.Zone.Name
+			}
+
+			collected = append(collected, types.CharacterReportSummary{
+				Code:      report.Code,
+				Title:     report.Title,
+				ZoneName:  zoneName,
+				BossNames: extractKilledBossNames(report.Fights),
+				StartTime: time.UnixMilli(report.StartTime),
+				EndTime:   time.UnixMilli(report.EndTime),
+			})
+			if len(collected) == limit {
+				nextOffset := index + 1
+				nextCursor := ""
+				if nextOffset < len(matchingReports) {
+					nextCursor = formatCharacterReportsCursor(currentPage, nextOffset)
+				} else if character.RecentReports.HasMorePages {
+					nextCursor = formatCharacterReportsCursor(currentPage+1, 0)
+				}
+
+				return &types.CharacterReportsPage{
+					Reports:    collected,
+					NextCursor: nextCursor,
+					HasMore:    nextCursor != "",
+				}, nil
+			}
+		}
+
+		if reachedCutoff || !character.RecentReports.HasMorePages {
+			break
+		}
+		currentPage++
+		currentOffset = 0
+	}
+
+	nextCursor := ""
+	return &types.CharacterReportsPage{
+		Reports:    collected,
+		NextCursor: nextCursor,
+		HasMore:    false,
+	}, nil
 }
 
 func (c *WCLHTTPClient) getAccessToken() (string, error) {
@@ -392,14 +582,16 @@ func (c *WCLHTTPClient) normalizeReport(wclReport WCLReport) *types.NormalizedRe
 }
 
 // normalizeFights converts WCL API fights to our internal format
-func (c *WCLHTTPClient) normalizeFights(wclFights []WCLFight) []types.NormalizedFight {
+func (c *WCLHTTPClient) normalizeFights(reportStartTime int64, wclFights []WCLFight) []types.NormalizedFight {
 	fights := make([]types.NormalizedFight, len(wclFights))
 	for i, fight := range wclFights {
+		startTime := absoluteReportTimestamp(reportStartTime, fight.StartTime)
+		endTime := absoluteReportTimestamp(reportStartTime, fight.EndTime)
 		fights[i] = types.NormalizedFight{
 			ID:          fight.ID,
 			Name:        fight.Name,
-			StartTime:   time.UnixMilli(fight.StartTime),
-			EndTime:     time.UnixMilli(fight.EndTime),
+			StartTime:   time.UnixMilli(startTime),
+			EndTime:     time.UnixMilli(endTime),
 			EncounterID: fight.EncounterID,
 			Difficulty:  c.normalizeDifficulty(fight.Difficulty),
 			Kill:        fight.Kill,
@@ -573,17 +765,17 @@ func (c *WCLHTTPClient) fetchRankedPlayerFightData(ranking WCLRankingEntry) (typ
 		return types.PlayerFightData{}, fmt.Errorf("fight %d not found in report %s", ranking.Report.FightID, ranking.Report.Code)
 	}
 
-	actors, err := c.getPlayerActors(ranking.Report.Code)
+	characters, err := c.getFightCharacters(ranking.Report.Code, ranking.Report.FightID)
 	if err != nil {
 		return types.PlayerFightData{}, err
 	}
 
-	actor, found := matchRankingToActor(actors, ranking)
+	character, found := matchRankingToCharacter(characters, ranking)
 	if !found {
 		return types.PlayerFightData{}, fmt.Errorf("actor match not found for %s in report %s", ranking.Name, ranking.Report.Code)
 	}
 
-	return c.fetchPlayerFightData(ranking.Report.Code, *fight, actor)
+	return c.fetchPlayerFightData(ranking.Report.Code, *fight, character.ID)
 }
 
 func (c *WCLHTTPClient) getPlayerActors(reportID string) ([]WCLActor, error) {
@@ -633,29 +825,82 @@ func (c *WCLHTTPClient) getPlayerActors(reportID string) ([]WCLActor, error) {
 	return actors, nil
 }
 
-func (c *WCLHTTPClient) fetchPlayerFightData(reportID string, fight types.NormalizedFight, actor WCLActor) (types.PlayerFightData, error) {
-	startTime := fight.StartTime.UnixMilli()
-	endTime := fight.EndTime.UnixMilli()
+func (c *WCLHTTPClient) getFightCharacters(reportID string, fightID int) ([]types.CharacterOption, error) {
+	actors, err := c.getPlayerActors(reportID)
+	if err != nil {
+		return nil, err
+	}
 
-	castRaw, err := c.fetchEvents(reportID, "Casts", fight.ID, actor.ID, startTime, endTime)
+	serverByID := make(map[int]string, len(actors))
+	for _, actor := range actors {
+		if actor.ID == 0 {
+			continue
+		}
+		serverByID[actor.ID] = actor.Server
+	}
+
+	query := fmt.Sprintf(`
+		query {
+			reportData {
+				report(code: "%s") {
+					playerDetails(
+						fightIDs: [%d],
+						includeCombatantInfo: false
+					)
+				}
+			}
+		}`, reportID, fightID)
+
+	var response struct {
+		Data struct {
+			ReportData struct {
+				Report struct {
+					PlayerDetails json.RawMessage `json:"playerDetails"`
+				} `json:"report"`
+			} `json:"reportData"`
+		} `json:"data"`
+	}
+
+	if err := c.makeGraphQLRequest(query, &response); err != nil {
+		return nil, fmt.Errorf("failed to fetch fight player details: %w", err)
+	}
+
+	characters, err := parseFightCharacters(
+		response.Data.ReportData.Report.PlayerDetails,
+		actors,
+		serverByID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse fight player details: %w", err)
+	}
+
+	sort.Slice(characters, func(i, j int) bool {
+		return characters[i].Name < characters[j].Name
+	})
+
+	return characters, nil
+}
+
+func (c *WCLHTTPClient) fetchPlayerFightData(reportID string, fight types.NormalizedFight, actorID int) (types.PlayerFightData, error) {
+	castRaw, err := c.fetchEvents(reportID, "Casts", fight.ID, actorID)
 	if err != nil {
 		return types.PlayerFightData{}, err
 	}
-	damageRaw, err := c.fetchEvents(reportID, "DamageDone", fight.ID, actor.ID, startTime, endTime)
+	damageRaw, err := c.fetchEvents(reportID, "DamageDone", fight.ID, actorID)
 	if err != nil {
 		return types.PlayerFightData{}, err
 	}
-	healRaw, err := c.fetchEvents(reportID, "Healing", fight.ID, actor.ID, startTime, endTime)
+	healRaw, err := c.fetchEvents(reportID, "Healing", fight.ID, actorID)
 	if err != nil {
 		return types.PlayerFightData{}, err
 	}
-	buffRaw, err := c.fetchBuffEvents(reportID, fight.ID, actor.ID, startTime, endTime)
+	buffRaw, err := c.fetchBuffEvents(reportID, fight.ID, actorID)
 	if err != nil {
 		return types.PlayerFightData{}, err
 	}
 
 	return types.PlayerFightData{
-		PlayerID:       actor.ID,
+		PlayerID:       actorID,
 		FightID:        fight.ID,
 		FightStart:     fight.StartTime,
 		FightEnd:       fight.EndTime,
@@ -667,11 +912,16 @@ func (c *WCLHTTPClient) fetchPlayerFightData(reportID string, fight types.Normal
 	}, nil
 }
 
-func (c *WCLHTTPClient) fetchEvents(reportID, dataType string, fightID, sourceID int, startTime, endTime int64) ([]map[string]interface{}, error) {
+func (c *WCLHTTPClient) fetchEvents(reportID, dataType string, fightID, sourceID int) ([]map[string]interface{}, error) {
 	collected := make([]map[string]interface{}, 0)
-	nextStart := startTime
+	var nextStart *int64
 
 	for {
+		startClause := ""
+		if nextStart != nil {
+			startClause = fmt.Sprintf("\n\t\t\t\t\t\t\tstartTime: %d,", *nextStart)
+		}
+
 		query := fmt.Sprintf(`
 			query {
 				reportData {
@@ -680,8 +930,7 @@ func (c *WCLHTTPClient) fetchEvents(reportID, dataType string, fightID, sourceID
 							dataType: %s,
 							fightIDs: [%d],
 							sourceID: %d,
-							startTime: %d,
-							endTime: %d,
+%s
 							limit: 10000
 						) {
 							data
@@ -689,7 +938,7 @@ func (c *WCLHTTPClient) fetchEvents(reportID, dataType string, fightID, sourceID
 						}
 					}
 				}
-			}`, reportID, dataType, fightID, sourceID, nextStart, endTime)
+			}`, reportID, dataType, fightID, sourceID, startClause)
 
 		var response struct {
 			Data struct {
@@ -709,20 +958,29 @@ func (c *WCLHTTPClient) fetchEvents(reportID, dataType string, fightID, sourceID
 		}
 
 		collected = append(collected, response.Data.ReportData.Report.Events.Data...)
-		if response.Data.ReportData.Report.Events.NextPageTimestamp == nil || int64(*response.Data.ReportData.Report.Events.NextPageTimestamp) <= nextStart {
+		if response.Data.ReportData.Report.Events.NextPageTimestamp == nil {
 			break
 		}
-		nextStart = int64(*response.Data.ReportData.Report.Events.NextPageTimestamp)
+		nextValue := int64(*response.Data.ReportData.Report.Events.NextPageTimestamp)
+		if nextStart != nil && nextValue <= *nextStart {
+			break
+		}
+		nextStart = &nextValue
 	}
 
 	return collected, nil
 }
 
-func (c *WCLHTTPClient) fetchBuffEvents(reportID string, fightID, actorID int, startTime, endTime int64) ([]map[string]interface{}, error) {
+func (c *WCLHTTPClient) fetchBuffEvents(reportID string, fightID, actorID int) ([]map[string]interface{}, error) {
 	collected := make([]map[string]interface{}, 0)
-	nextStart := startTime
+	var nextStart *int64
 
 	for {
+		startClause := ""
+		if nextStart != nil {
+			startClause = fmt.Sprintf("\n\t\t\t\t\t\t\tstartTime: %d,", *nextStart)
+		}
+
 		query := fmt.Sprintf(`
 			query {
 				reportData {
@@ -731,8 +989,7 @@ func (c *WCLHTTPClient) fetchBuffEvents(reportID string, fightID, actorID int, s
 							dataType: Buffs,
 							fightIDs: [%d],
 							targetID: %d,
-							startTime: %d,
-							endTime: %d,
+%s
 							limit: 10000
 						) {
 							data
@@ -740,7 +997,7 @@ func (c *WCLHTTPClient) fetchBuffEvents(reportID string, fightID, actorID int, s
 						}
 					}
 				}
-			}`, reportID, fightID, actorID, nextStart, endTime)
+			}`, reportID, fightID, actorID, startClause)
 
 		var response struct {
 			Data struct {
@@ -760,40 +1017,44 @@ func (c *WCLHTTPClient) fetchBuffEvents(reportID string, fightID, actorID int, s
 		}
 
 		collected = append(collected, response.Data.ReportData.Report.Events.Data...)
-		if response.Data.ReportData.Report.Events.NextPageTimestamp == nil || int64(*response.Data.ReportData.Report.Events.NextPageTimestamp) <= nextStart {
+		if response.Data.ReportData.Report.Events.NextPageTimestamp == nil {
 			break
 		}
-		nextStart = int64(*response.Data.ReportData.Report.Events.NextPageTimestamp)
+		nextValue := int64(*response.Data.ReportData.Report.Events.NextPageTimestamp)
+		if nextStart != nil && nextValue <= *nextStart {
+			break
+		}
+		nextStart = &nextValue
 	}
 
 	return collected, nil
 }
 
-func matchRankingToActor(actors []WCLActor, ranking WCLRankingEntry) (WCLActor, bool) {
+func matchRankingToCharacter(characters []types.CharacterOption, ranking WCLRankingEntry) (types.CharacterOption, bool) {
 	rankingName := strings.TrimSpace(ranking.Name)
-	rankingServer := strings.TrimSpace(ranking.Server.Name)
+	rankingClass := normalizeClass(ranking.Class)
 	rankingSpec := normalizeSpec(ranking.Spec)
 
-	for _, actor := range actors {
-		if strings.TrimSpace(actor.Name) != rankingName {
+	for _, character := range characters {
+		if strings.TrimSpace(character.Name) != rankingName {
 			continue
 		}
-		if rankingServer != "" && strings.TrimSpace(actor.Server) != "" && strings.TrimSpace(actor.Server) != rankingServer {
+		if rankingClass != "" && normalizeClass(character.Class) != rankingClass {
 			continue
 		}
-		if rankingSpec != "" && normalizeSpec(actor.SubType) != rankingSpec {
+		if rankingSpec != "" && normalizeSpec(character.Spec) != rankingSpec {
 			continue
 		}
-		return actor, true
+		return character, true
 	}
 
-	for _, actor := range actors {
-		if strings.TrimSpace(actor.Name) == rankingName {
-			return actor, true
+	for _, character := range characters {
+		if strings.TrimSpace(character.Name) == rankingName {
+			return character, true
 		}
 	}
 
-	return WCLActor{}, false
+	return types.CharacterOption{}, false
 }
 
 func normalizeCastEvents(raw []map[string]interface{}) []types.CastEvent {
@@ -1014,4 +1275,354 @@ func isRetryableWCLFailure(err error) bool {
 		strings.Contains(message, "status 503") ||
 		strings.Contains(message, "status 502") ||
 		strings.Contains(message, "timeout")
+}
+
+func (c *WCLHTTPClient) getCurrentUserCharacterReports(accessToken string, characterID, page, limit int) (*WCLUserCharacter, error) {
+	query := fmt.Sprintf(`
+		query {
+			userData {
+				currentUser {
+					characters {
+						canonicalID
+						name
+						classID
+						server {
+							name
+							slug
+							region {
+								name
+							}
+						}
+						recentReports(limit: %d, page: %d) {
+							data {
+								code
+								title
+								startTime
+								endTime
+								zone {
+									id
+									name
+								}
+								fights {
+									id
+									name
+									encounterID
+									difficulty
+									kill
+								}
+							}
+							current_page
+							last_page
+							has_more_pages
+						}
+					}
+				}
+			}
+		}`, limit, page)
+
+	var response struct {
+		Data struct {
+			UserData struct {
+				CurrentUser struct {
+					Characters []WCLUserCharacter `json:"characters"`
+				} `json:"currentUser"`
+			} `json:"userData"`
+		} `json:"data"`
+	}
+
+	if err := c.makeUserGraphQLRequest(accessToken, query, &response); err != nil {
+		return nil, fmt.Errorf("failed to fetch character recent reports: %w", err)
+	}
+
+	for _, character := range response.Data.UserData.CurrentUser.Characters {
+		if character.CanonicalID == characterID {
+			characterCopy := character
+			return &characterCopy, nil
+		}
+	}
+
+	return nil, fmt.Errorf("character %d was not found for the current user", characterID)
+}
+
+func classNameFromID(classID int) string {
+	switch classID {
+	case 1:
+		return "Warrior"
+	case 2:
+		return "Paladin"
+	case 3:
+		return "Hunter"
+	case 4:
+		return "Rogue"
+	case 5:
+		return "Priest"
+	case 6:
+		return "Death Knight"
+	case 7:
+		return "Shaman"
+	case 8:
+		return "Mage"
+	case 9:
+		return "Warlock"
+	case 10:
+		return "Monk"
+	case 11:
+		return "Druid"
+	case 12:
+		return "Demon Hunter"
+	case 13:
+		return "Evoker"
+	default:
+		return "Unknown"
+	}
+}
+
+func deriveCharacterClassID(character WCLUserCharacter) (int, bool) {
+	for _, report := range character.RecentReports.Data {
+		for _, rankedCharacter := range report.RankedCharacters {
+			if rankedCharacter.CanonicalID != 0 &&
+				rankedCharacter.CanonicalID == character.CanonicalID {
+				return rankedCharacter.ClassID, true
+			}
+		}
+	}
+
+	for _, report := range character.RecentReports.Data {
+		for _, rankedCharacter := range report.RankedCharacters {
+			if strings.EqualFold(strings.TrimSpace(rankedCharacter.Name), strings.TrimSpace(character.Name)) &&
+				strings.EqualFold(strings.TrimSpace(rankedCharacter.Server.Name), strings.TrimSpace(character.Server.Name)) {
+				return rankedCharacter.ClassID, true
+			}
+		}
+	}
+
+	return 0, false
+}
+
+func isAllowedRaidReportTitle(title string) bool {
+	normalized := strings.ToUpper(strings.TrimSpace(title))
+	if normalized == "" {
+		return false
+	}
+
+	return strings.Contains(normalized, "VS / DR / MQD")
+}
+
+func absoluteReportTimestamp(reportStartTime, value int64) int64 {
+	if reportStartTime > 0 && value >= 0 && value < reportStartTime {
+		return reportStartTime + value
+	}
+	return value
+}
+
+func parseFightCharacters(raw json.RawMessage, actors []WCLActor, serverByID map[int]string) ([]types.CharacterOption, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, nil
+	}
+
+	var payload interface{}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return nil, err
+	}
+
+	characters := make([]types.CharacterOption, 0)
+	seen := make(map[int]struct{})
+	collectFightCharacters(payload, "", actors, serverByID, seen, &characters)
+
+	return characters, nil
+}
+
+func collectFightCharacters(node interface{}, role string, actors []WCLActor, serverByID map[int]string, seen map[int]struct{}, characters *[]types.CharacterOption) {
+	switch typed := node.(type) {
+	case map[string]interface{}:
+		nextRole := role
+		for key, value := range typed {
+			switch strings.ToLower(strings.TrimSpace(key)) {
+			case "tanks":
+				collectFightCharacters(value, "Tank", actors, serverByID, seen, characters)
+				continue
+			case "healers":
+				collectFightCharacters(value, "Healer", actors, serverByID, seen, characters)
+				continue
+			case "dps":
+				collectFightCharacters(value, "DPS", actors, serverByID, seen, characters)
+				continue
+			}
+		}
+
+		if character, ok := buildCharacterOption(typed, nextRole, actors, serverByID); ok {
+			if _, exists := seen[character.ID]; !exists {
+				seen[character.ID] = struct{}{}
+				*characters = append(*characters, character)
+			}
+		}
+
+		for _, value := range typed {
+			collectFightCharacters(value, nextRole, actors, serverByID, seen, characters)
+		}
+	case []interface{}:
+		for _, value := range typed {
+			collectFightCharacters(value, role, actors, serverByID, seen, characters)
+		}
+	}
+}
+
+func buildCharacterOption(payload map[string]interface{}, role string, actors []WCLActor, serverByID map[int]string) (types.CharacterOption, bool) {
+	id := parseInt(payload["id"])
+	name := parseString(payload["name"])
+	className := normalizeClass(parseString(payload["type"]))
+
+	if id == 0 || strings.TrimSpace(name) == "" || strings.TrimSpace(className) == "" {
+		return types.CharacterOption{}, false
+	}
+	if strings.EqualFold(className, "Pet") {
+		return types.CharacterOption{}, false
+	}
+
+	spec := extractSpecName(payload)
+	if role == "" {
+		role = inferRole(spec)
+	}
+
+	actorID := resolveActorID(id, name, className, actors)
+	if actorID == 0 {
+		actorID = id
+	}
+
+	return types.CharacterOption{
+		ID:         actorID,
+		Name:       name,
+		Class:      className,
+		Spec:       spec,
+		Role:       role,
+		ServerName: strings.TrimSpace(serverByID[actorID]),
+	}, true
+}
+
+func resolveActorID(playerDetailID int, name, className string, actors []WCLActor) int {
+	for _, actor := range actors {
+		if actor.ID == playerDetailID {
+			return actor.ID
+		}
+	}
+
+	trimmedName := strings.TrimSpace(name)
+	normalizedClass := normalizeClass(className)
+
+	for _, actor := range actors {
+		if strings.TrimSpace(actor.Name) != trimmedName {
+			continue
+		}
+		if normalizedClass != "" && normalizeClass(actor.Type) != normalizedClass {
+			continue
+		}
+		return actor.ID
+	}
+
+	for _, actor := range actors {
+		if strings.TrimSpace(actor.Name) == trimmedName {
+			return actor.ID
+		}
+	}
+
+	return 0
+}
+
+func extractSpecName(payload map[string]interface{}) string {
+	if value, ok := payload["spec"]; ok {
+		if spec := normalizeSpec(parseString(value)); spec != "" {
+			return spec
+		}
+	}
+
+	specsValue, ok := payload["specs"]
+	if !ok {
+		return ""
+	}
+
+	switch typed := specsValue.(type) {
+	case []interface{}:
+		for _, entry := range typed {
+			switch specEntry := entry.(type) {
+			case string:
+				if spec := normalizeSpec(specEntry); spec != "" {
+					return spec
+				}
+			case map[string]interface{}:
+				if spec := normalizeSpec(parseString(specEntry["spec"])); spec != "" {
+					return spec
+				}
+				if spec := normalizeSpec(parseString(specEntry["name"])); spec != "" {
+					return spec
+				}
+			}
+		}
+	}
+
+	return ""
+}
+
+func extractKilledBossNames(fights []WCLFight) []string {
+	if len(fights) == 0 {
+		return nil
+	}
+
+	bossNames := make([]string, 0, len(fights))
+	seen := make(map[string]struct{}, len(fights))
+	for _, fight := range fights {
+		name := strings.TrimSpace(fight.Name)
+		if !isRelevantKilledBossFight(fight) || name == "" {
+			continue
+		}
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		seen[name] = struct{}{}
+		bossNames = append(bossNames, name)
+	}
+
+	return bossNames
+}
+
+func hasSuccessfulBossKill(fights []WCLFight) bool {
+	for _, fight := range fights {
+		if isRelevantKilledBossFight(fight) && strings.TrimSpace(fight.Name) != "" {
+			return true
+		}
+	}
+
+	return false
+}
+
+func isRelevantKilledBossFight(fight WCLFight) bool {
+	return fight.Kill &&
+		fight.EncounterID != 0 &&
+		fight.Difficulty != 0
+}
+
+func parseCharacterReportsCursor(cursor string) (int, int) {
+	page := 1
+	offset := 0
+	trimmed := strings.TrimSpace(cursor)
+	if trimmed == "" {
+		return page, offset
+	}
+
+	parts := strings.Split(trimmed, ":")
+	if len(parts) >= 1 {
+		if parsedPage, err := strconv.Atoi(parts[0]); err == nil && parsedPage > 0 {
+			page = parsedPage
+		}
+	}
+	if len(parts) >= 2 {
+		if parsedOffset, err := strconv.Atoi(parts[1]); err == nil && parsedOffset >= 0 {
+			offset = parsedOffset
+		}
+	}
+
+	return page, offset
+}
+
+func formatCharacterReportsCursor(page, offset int) string {
+	return fmt.Sprintf("%d:%d", page, offset)
 }

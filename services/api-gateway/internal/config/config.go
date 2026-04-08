@@ -8,6 +8,12 @@ type Config struct {
 	LogServiceURL      string
 	AnalysisServiceURL string
 	AIServiceURL       string
+	FrontendURL        string
+	WCLClientID        string
+	WCLClientSecret    string
+	WCLAuthorizeURL    string
+	WCLTokenURL        string
+	WCLRedirectURL     string
 }
 
 func Load() Config {
@@ -17,6 +23,12 @@ func Load() Config {
 		LogServiceURL:      getEnv("LOG_SERVICE_URL", "http://localhost:8081"),
 		AnalysisServiceURL: getEnv("ANALYSIS_SERVICE_URL", "http://localhost:8082"),
 		AIServiceURL:       getEnv("AI_SERVICE_URL", "http://localhost:8083"),
+		FrontendURL:        getEnv("FRONTEND_URL", "http://localhost:5173"),
+		WCLClientID:        firstEnv("WCL_CLIENT_ID", "WARCRAFTLOGS_CLIENT_ID", ""),
+		WCLClientSecret:    firstEnv("WCL_CLIENT_SECRET", "WARCRAFTLOGS_CLIENT_SECRET", ""),
+		WCLAuthorizeURL:    getEnv("WCL_AUTHORIZE_URL", "https://www.warcraftlogs.com/oauth/authorize"),
+		WCLTokenURL:        getEnv("WCL_TOKEN_URL", "https://www.warcraftlogs.com/oauth/token"),
+		WCLRedirectURL:     getEnv("WCL_REDIRECT_URL", "http://localhost:8080/api/auth/callback"),
 	}
 }
 

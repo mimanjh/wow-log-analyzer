@@ -236,10 +236,18 @@ type ReportJob struct {
 	Status    ReportJobStatus         `json:"status"`
 	Stage     string                  `json:"stage"`
 	Message   string                  `json:"message"`
+	Fight     FightSummary            `json:"fight"`
+	Character CharacterSummary        `json:"character"`
+	Progress  ReportJobProgress       `json:"progress"`
 	Error     string                  `json:"error,omitempty"`
 	Result    *GenerateReportResponse `json:"result,omitempty"`
 	CreatedAt time.Time               `json:"createdAt"`
 	UpdatedAt time.Time               `json:"updatedAt"`
+}
+
+type ReportJobProgress struct {
+	Current int `json:"current"`
+	Total   int `json:"total"`
 }
 
 type ReportService struct {
@@ -281,6 +289,12 @@ func (s *ReportService) CreateJob(req GenerateReportRequest) (ReportJob, error) 
 		Status:    ReportJobQueued,
 		Stage:     "queued",
 		Message:   "Queued for report generation.",
+		Fight:     req.Fight,
+		Character: req.Character,
+		Progress: ReportJobProgress{
+			Current: 0,
+			Total:   5,
+		},
 		CreatedAt: time.Now().UTC(),
 		UpdatedAt: time.Now().UTC(),
 	}
@@ -307,27 +321,27 @@ func (s *ReportService) GetJob(jobID string) (ReportJob, error) {
 func (s *ReportService) runJob(jobID string, req GenerateReportRequest) {
 	ctx := context.Background()
 
-	s.updateJob(jobID, ReportJobRunning, "player-data", "Fetching selected player fight data.", "", nil)
+	s.updateJob(jobID, ReportJobRunning, "player-data", "Fetching selected player fight data.", ReportJobProgress{Current: 1, Total: 5}, "", nil)
 	playerData, err := s.fetchPlayerData(ctx, req)
 	if err != nil {
-		s.updateJob(jobID, ReportJobFailed, "player-data", "Failed to fetch selected player fight data.", err.Error(), nil)
+		s.updateJob(jobID, ReportJobFailed, "player-data", "Failed to fetch selected player fight data.", ReportJobProgress{Current: 1, Total: 5}, err.Error(), nil)
 		return
 	}
 
-	s.updateJob(jobID, ReportJobRunning, "rankings", "Fetching ranking candidates for the selected boss and spec.", "", nil)
+	s.updateJob(jobID, ReportJobRunning, "rankings", "Fetching ranking candidates for the selected boss and spec.", ReportJobProgress{Current: 2, Total: 5}, "", nil)
 	candidates, err := s.fetchRankingCandidates(ctx, req)
 	if err != nil {
-		s.updateJob(jobID, ReportJobFailed, "rankings", "Failed to fetch ranking candidates.", err.Error(), nil)
+		s.updateJob(jobID, ReportJobFailed, "rankings", "Failed to fetch ranking candidates.", ReportJobProgress{Current: 2, Total: 5}, err.Error(), nil)
 		return
 	}
 	if len(candidates) == 0 {
-		s.updateJob(jobID, ReportJobFailed, "rankings", "No ranking candidates were available for this fight.", "no ranking candidates returned", nil)
+		s.updateJob(jobID, ReportJobFailed, "rankings", "No ranking candidates were available for this fight.", ReportJobProgress{Current: 2, Total: 5}, "no ranking candidates returned", nil)
 		return
 	}
 
 	cohortData := make([]json.RawMessage, 0, len(candidates))
 	for index, candidate := range candidates {
-		s.updateJob(jobID, ReportJobRunning, "cohort", fmt.Sprintf("Fetching cohort member %d of %d.", index+1, len(candidates)), "", nil)
+		s.updateJob(jobID, ReportJobRunning, "cohort", fmt.Sprintf("Fetching cohort member %d of %d.", index+1, len(candidates)), ReportJobProgress{Current: index + 1, Total: len(candidates)}, "", nil)
 		memberData, err := s.fetchCohortMember(ctx, candidate)
 		if err != nil {
 			continue
@@ -335,14 +349,14 @@ func (s *ReportService) runJob(jobID string, req GenerateReportRequest) {
 		cohortData = append(cohortData, memberData)
 	}
 	if len(cohortData) == 0 {
-		s.updateJob(jobID, ReportJobFailed, "cohort", "Failed to collect any cohort members.", "no cohort member data could be fetched", nil)
+		s.updateJob(jobID, ReportJobFailed, "cohort", "Failed to collect any cohort members.", ReportJobProgress{Current: len(candidates), Total: len(candidates)}, "no cohort member data could be fetched", nil)
 		return
 	}
 
-	s.updateJob(jobID, ReportJobRunning, "analyzing", "Running deterministic comparison analysis.", "", nil)
+	s.updateJob(jobID, ReportJobRunning, "analyzing", "Running deterministic comparison analysis.", ReportJobProgress{Current: 4, Total: 5}, "", nil)
 	comparison, err := s.fetchComparison(ctx, playerData, cohortData)
 	if err != nil {
-		s.updateJob(jobID, ReportJobFailed, "analyzing", "Failed to compute deterministic comparison metrics.", err.Error(), nil)
+		s.updateJob(jobID, ReportJobFailed, "analyzing", "Failed to compute deterministic comparison metrics.", ReportJobProgress{Current: 4, Total: 5}, err.Error(), nil)
 		return
 	}
 
@@ -356,11 +370,11 @@ func (s *ReportService) runJob(jobID string, req GenerateReportRequest) {
 		},
 	}
 
-	s.updateJob(jobID, ReportJobRunning, "insights", "Generating AI insights.", "", &response)
+	s.updateJob(jobID, ReportJobRunning, "insights", "Generating AI insights.", ReportJobProgress{Current: 5, Total: 5}, "", &response)
 	insights, err := s.fetchInsights(ctx, req, response.Comparison)
 	if err != nil {
 		response.AI.Warning = "AI insights were unavailable. Deterministic metrics are still shown."
-		s.updateJob(jobID, ReportJobCompleted, "completed", "Report completed without AI insights.", "", &response)
+		s.updateJob(jobID, ReportJobCompleted, "completed", "Report completed without AI insights.", ReportJobProgress{Current: 5, Total: 5}, "", &response)
 		return
 	}
 
@@ -375,7 +389,7 @@ func (s *ReportService) runJob(jobID string, req GenerateReportRequest) {
 		response.AI.Warning = "AI used the deterministic fallback formatter for this report."
 	}
 
-	s.updateJob(jobID, ReportJobCompleted, "completed", "Report completed.", "", &response)
+	s.updateJob(jobID, ReportJobCompleted, "completed", "Report completed.", ReportJobProgress{Current: 5, Total: 5}, "", &response)
 }
 
 func (s *ReportService) setJob(job ReportJob) {
@@ -384,7 +398,7 @@ func (s *ReportService) setJob(job ReportJob) {
 	s.jobs[job.ID] = job
 }
 
-func (s *ReportService) updateJob(jobID string, status ReportJobStatus, stage, message, errText string, result *GenerateReportResponse) {
+func (s *ReportService) updateJob(jobID string, status ReportJobStatus, stage, message string, progress ReportJobProgress, errText string, result *GenerateReportResponse) {
 	s.jobMu.Lock()
 	defer s.jobMu.Unlock()
 
@@ -396,6 +410,7 @@ func (s *ReportService) updateJob(jobID string, status ReportJobStatus, stage, m
 	job.Status = status
 	job.Stage = stage
 	job.Message = message
+	job.Progress = progress
 	job.Error = errText
 	job.Result = result
 	job.UpdatedAt = time.Now().UTC()

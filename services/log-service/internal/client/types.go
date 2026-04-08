@@ -17,13 +17,13 @@ type WCLZone struct {
 
 // WCLFight represents the raw Warcraft Logs API fight structure
 type WCLFight struct {
-	ID             int    `json:"id"`
-	Name           string `json:"name"`
-	StartTime      int64  `json:"startTime"`
-	EndTime        int64  `json:"endTime"`
-	EncounterID    int    `json:"encounterID"`
-	Difficulty     int    `json:"difficulty"`
-	Kill           bool   `json:"kill"`
+	ID             int     `json:"id"`
+	Name           string  `json:"name"`
+	StartTime      int64   `json:"startTime"`
+	EndTime        int64   `json:"endTime"`
+	EncounterID    int     `json:"encounterID"`
+	Difficulty     int     `json:"difficulty"`
+	Kill           bool    `json:"kill"`
 	BossPercentage float64 `json:"bossPercentage"`
 }
 
@@ -35,6 +35,17 @@ type WCLActor struct {
 	Server   string  `json:"server"`
 	SubType  string  `json:"subType"`
 	Type     string  `json:"type"`
+}
+
+type WCLPlayerSpec struct {
+	Spec string `json:"spec"`
+}
+
+type WCLPlayerDetail struct {
+	ID    int             `json:"id"`
+	Name  string          `json:"name"`
+	Type  string          `json:"type"`
+	Specs []WCLPlayerSpec `json:"specs"`
 }
 
 type WCLRankingReport struct {
@@ -72,4 +83,54 @@ type WCLTokenResponse struct {
 	AccessToken string `json:"access_token"`
 	TokenType   string `json:"token_type"`
 	ExpiresIn   int    `json:"expires_in"`
+}
+
+type WCLRegion struct {
+	Name string `json:"name"`
+}
+
+type WCLServer struct {
+	Name   string    `json:"name"`
+	Slug   string    `json:"slug"`
+	Region WCLRegion `json:"region"`
+}
+
+type WCLUserCharacter struct {
+	CanonicalID   int                 `json:"canonicalID"`
+	Name          string              `json:"name"`
+	ClassID       int                 `json:"classID"`
+	Server        WCLServer           `json:"server"`
+	RecentReports WCLReportPagination `json:"recentReports"`
+}
+
+type WCLCurrentUser struct {
+	ID         int                `json:"id"`
+	Name       string             `json:"name"`
+	Avatar     string             `json:"avatar"`
+	BattleTag  string             `json:"battleTag"`
+	Characters []WCLUserCharacter `json:"characters"`
+}
+
+type WCLRankedCharacter struct {
+	CanonicalID int       `json:"canonicalID"`
+	Name        string    `json:"name"`
+	ClassID     int       `json:"classID"`
+	Server      WCLServer `json:"server"`
+}
+
+type WCLReportSummary struct {
+	Code             string               `json:"code"`
+	Title            string               `json:"title"`
+	StartTime        int64                `json:"startTime"`
+	EndTime          int64                `json:"endTime"`
+	Zone             *WCLZone             `json:"zone"`
+	Fights           []WCLFight           `json:"fights"`
+	RankedCharacters []WCLRankedCharacter `json:"rankedCharacters"`
+}
+
+type WCLReportPagination struct {
+	Data         []WCLReportSummary `json:"data"`
+	CurrentPage  int                `json:"current_page"`
+	LastPage     int                `json:"last_page"`
+	HasMorePages bool               `json:"has_more_pages"`
 }

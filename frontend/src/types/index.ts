@@ -23,10 +23,69 @@ export interface AnalyzeState {
   reset: () => void
 }
 
+export interface BrowserState {
+  auth: AuthStatus | null
+  characters: BrowserCharacter[]
+  selectedCharacter: BrowserCharacter | null
+  reports: CharacterReportSummary[]
+  nextCursor: string | null
+  hasMoreReports: boolean
+  isAuthLoading: boolean
+  isCharactersLoading: boolean
+  isReportsLoading: boolean
+  error: string | null
+  setAuth: (auth: AuthStatus | null) => void
+  setCharacters: (characters: BrowserCharacter[]) => void
+  finishCharactersLoad: (characters: BrowserCharacter[]) => void
+  setSelectedCharacter: (character: BrowserCharacter | null) => void
+  resetReports: () => void
+  appendReports: (page: CharacterReportsPage) => void
+  setLoadingState: (key: "isAuthLoading" | "isCharactersLoading" | "isReportsLoading", value: boolean) => void
+  setError: (error: string | null) => void
+  reset: () => void
+}
+
+export interface AuthStatus {
+  authenticated: boolean
+  user?: AuthUser
+}
+
+export interface AuthUser {
+  id: number
+  name: string
+  avatar?: string
+  battleTag?: string
+}
+
+export interface BrowserCharacter {
+  id: number
+  name: string
+  class: string
+  serverName: string
+  serverRegion: string
+  serverSlug?: string
+}
+
+export interface CharacterReportSummary {
+  code: string
+  title: string
+  zoneName?: string
+  bossNames?: string[]
+  startTime: string
+  endTime: string
+}
+
+export interface CharacterReportsPage {
+  reports: CharacterReportSummary[]
+  nextCursor: string | null
+  hasMore: boolean
+}
+
 export interface Fight {
   id: number
   name: string
   difficulty: string
+  kill: boolean
   killTime: number
   encounterId: number
   startTime: string
@@ -40,6 +99,7 @@ export interface Character {
   class: string
   spec: string
   role: string
+  serverName?: string
 }
 
 export interface ComparisonResult {
@@ -61,10 +121,18 @@ export interface ReportJob {
   status: "queued" | "running" | "completed" | "failed"
   stage: string
   message: string
+  fight: Fight
+  character: Character
+  progress: ReportJobProgress
   error?: string
   result?: ReportResult
   createdAt: string
   updatedAt: string
+}
+
+export interface ReportJobProgress {
+  current: number
+  total: number
 }
 
 export interface AISection {

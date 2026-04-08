@@ -12,6 +12,15 @@ func RegisterRoutes(mux *http.ServeMux, logService *service.LogService) {
 
 	mux.HandleFunc("/", rootHandler)
 	mux.HandleFunc("/health", healthHandler)
+	mux.HandleFunc("/user/profile", handler.GetCurrentUser)
+	mux.HandleFunc("/user/characters", handler.GetOwnedCharacters)
+	mux.HandleFunc("/user/characters/", func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/reports") {
+			handler.GetCharacterReports(w, r)
+			return
+		}
+		http.NotFound(w, r)
+	})
 	mux.HandleFunc("/reports/", func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/comparison-data") {
 			handler.GetComparisonData(w, r)

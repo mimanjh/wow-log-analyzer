@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"wow-log-analyzer/services/log-service/internal/service"
@@ -132,6 +133,80 @@ func (h *Handler) GetComparisonData(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
+}
+
+func (h *Handler) GetCurrentUser(w http.ResponseWriter, r *http.Request) {
+	accessToken, ok := bearerToken(r)
+	if !ok {
+		http.Error(w, "authorization bearer token is required", http.StatusUnauthorized)
+		return
+	}
+
+	user, err := h.logService.GetCurrentUser(accessToken)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(user)
+}
+
+func (h *Handler) GetOwnedCharacters(w http.ResponseWriter, r *http.Request) {
+	accessToken, ok := bearerToken(r)
+	if !ok {
+		http.Error(w, "authorization bearer token is required", http.StatusUnauthorized)
+		return
+	}
+
+	characters, err := h.logService.GetOwnedCharacters(accessToken)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(characters)
+}
+
+func (h *Handler) GetCharacterReports(w http.ResponseWriter, r *http.Request) {
+	accessToken, ok := bearerToken(r)
+	if !ok {
+		http.Error(w, "authorization bearer token is required", http.StatusUnauthorized)
+		return
+	}
+
+	path := strings.TrimPrefix(r.URL.Path, "/user/characters/")
+	path = strings.TrimSuffix(path, "/reports")
+	characterID, err := strconv.Atoi(path)
+	if err != nil || characterID <= 0 {
+		http.Error(w, "invalid character id", http.StatusBadRequest)
+		return
+	}
+
+	limit := 10
+	if value := r.URL.Query().Get("limit"); value != "" {
+		if parsed, err := strconv.Atoi(value); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+
+	page, err := h.logService.GetCharacterReports(accessToken, characterID, r.URL.Query().Get("cursor"), limit)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(page)
+}
+
+func bearerToken(r *http.Request) (string, bool) {
+	value := strings.TrimSpace(r.Header.Get("Authorization"))
+	if !strings.HasPrefix(strings.ToLower(value), "bearer ") {
+		return "", false
+	}
+	return strings.TrimSpace(value[7:]), true
 }
 
 func (h *Handler) GetPlayerData(w http.ResponseWriter, r *http.Request) {
