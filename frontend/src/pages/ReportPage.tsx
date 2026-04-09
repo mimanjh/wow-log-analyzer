@@ -4,7 +4,6 @@ import { useAnalyzeStore } from "../stores/useAnalyzeStore";
 import { useBrowserStore } from "../stores/useBrowserStore";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { Button } from "../components/ui/Button";
-import { MetricCard } from "../components/MetricCard";
 import { getAbilityTimeline, getReportJob } from "../lib/api";
 import {
     confidenceColor,
@@ -938,7 +937,7 @@ function renderProgressView(
                     { label: "Difficulty", value: fight.difficulty },
                     { label: "Result", value: fight.kill ? "Kill" : "Wipe" },
                     {
-                        label: "Kill Time",
+                        label: "Combat Time",
                         value: formatKillTime(fight.killTime),
                     },
                 ])}
@@ -1011,8 +1010,7 @@ export function ReportPage() {
         setReportJob,
         setReportResult,
         setError,
-    } =
-        useAnalyzeStore();
+    } = useAnalyzeStore();
     const browserSelectedCharacter = useBrowserStore(
         (state) => state.selectedCharacter,
     );
@@ -1129,7 +1127,7 @@ export function ReportPage() {
     }
 
     const { fight, character, comparison, ai } = reportResult!;
-    const { cohortStats, deltas } = comparison;
+    const { cohortStats } = comparison;
     const specKey = `${character.spec} ${character.class}`;
     const trackedPriority = trackedSpecPriorities[specKey] ?? {
         abilities: [],
@@ -1233,6 +1231,8 @@ export function ReportPage() {
                         Analysis Results
                     </h1>
                     <p className="mt-4 max-w-2xl text-slate-300">
+                        The analyzer assumes you have done the basic preparation
+                        for a raid: enchantments & gems & food & flask.
                         Comparison against {cohortStats.sampleSize} elite
                         players.
                     </p>
@@ -1642,92 +1642,6 @@ export function ReportPage() {
                                 No buff uptime comparisons matched this filter.
                             </p>
                         )}
-                    </div>
-                </div>
-
-                <div className="space-y-6">
-                    <h2 className="text-xl font-semibold text-white">
-                        Performance Metrics
-                    </h2>
-
-                    <div className="grid gap-6 lg:grid-cols-2">
-                        <MetricCard
-                            title="Casts per Minute"
-                            description="Average spell casts per minute during the fight"
-                            playerValue={deltas.castsPerMin.playerValue}
-                            cohortValue={deltas.castsPerMin.cohortValue}
-                            delta={deltas.castsPerMin.difference}
-                            confidence={
-                                deltas.castsPerMin.confidence as
-                                    | "high"
-                                    | "medium"
-                                    | "low"
-                            }
-                            caution={deltas.castsPerMin.caution}
-                        />
-
-                        <MetricCard
-                            title="Major Cooldown Count"
-                            description="Number of major defensive/healing cooldowns used"
-                            playerValue={deltas.majorCdCount.playerValue}
-                            cohortValue={deltas.majorCdCount.cohortValue}
-                            delta={deltas.majorCdCount.difference}
-                            confidence={
-                                deltas.majorCdCount.confidence as
-                                    | "high"
-                                    | "medium"
-                                    | "low"
-                            }
-                            caution={deltas.majorCdCount.caution}
-                        />
-
-                        <MetricCard
-                            title="Major Cooldown Timing Drift"
-                            description="Average deviation from optimal cooldown timing (seconds)"
-                            playerValue={deltas.majorCdDrift.playerValue}
-                            cohortValue={deltas.majorCdDrift.cohortValue}
-                            delta={deltas.majorCdDrift.difference}
-                            confidence={
-                                deltas.majorCdDrift.confidence as
-                                    | "high"
-                                    | "medium"
-                                    | "low"
-                            }
-                            caution={deltas.majorCdDrift.caution}
-                            unit="s"
-                        />
-
-                        <MetricCard
-                            title="Buff Uptime"
-                            description="Percentage of fight time with key buffs active"
-                            playerValue={deltas.buffUptime.playerValue}
-                            cohortValue={deltas.buffUptime.cohortValue}
-                            delta={deltas.buffUptime.difference}
-                            confidence={
-                                deltas.buffUptime.confidence as
-                                    | "high"
-                                    | "medium"
-                                    | "low"
-                            }
-                            caution={deltas.buffUptime.caution}
-                            unit="%"
-                        />
-
-                        <MetricCard
-                            title="Downtime Percentage"
-                            description="Percentage of fight time spent not casting"
-                            playerValue={deltas.downtimePct.playerValue}
-                            cohortValue={deltas.downtimePct.cohortValue}
-                            delta={deltas.downtimePct.difference}
-                            confidence={
-                                deltas.downtimePct.confidence as
-                                    | "high"
-                                    | "medium"
-                                    | "low"
-                            }
-                            caution={deltas.downtimePct.caution}
-                            unit="%"
-                        />
                     </div>
                 </div>
 

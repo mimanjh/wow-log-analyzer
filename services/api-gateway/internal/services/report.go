@@ -30,18 +30,18 @@ type GenerateReportResponse struct {
 }
 
 type AbilityTimelineResponse struct {
-	AbilityID       int                    `json:"abilityId"`
-	AbilityName     string                 `json:"abilityName"`
-	FightDurationMS int64                  `json:"fightDurationMs"`
-	Player          AbilityTimelineSeries  `json:"player"`
+	AbilityID       int                     `json:"abilityId"`
+	AbilityName     string                  `json:"abilityName"`
+	FightDurationMS int64                   `json:"fightDurationMs"`
+	Player          AbilityTimelineSeries   `json:"player"`
 	Elite           []AbilityTimelineSeries `json:"elite"`
 }
 
 type AbilityTimelineSeries struct {
-	Label     string   `json:"label"`
-	Subtitle  string   `json:"subtitle,omitempty"`
-	ReportURL string   `json:"reportUrl,omitempty"`
-	CastsMS   []int64  `json:"castsMs"`
+	Label     string  `json:"label"`
+	Subtitle  string  `json:"subtitle,omitempty"`
+	ReportURL string  `json:"reportUrl,omitempty"`
+	CastsMS   []int64 `json:"castsMs"`
 }
 
 type CohortEntry struct {
@@ -67,10 +67,10 @@ type AIReportSection struct {
 }
 
 type ComparisonResult struct {
-	PlayerMetrics PlayerFightMetrics `json:"playerMetrics"`
-	CohortStats   CohortStatistics   `json:"cohortStats"`
-	Deltas        MetricDeltas       `json:"deltas"`
-	Rankings      MetricRankings     `json:"rankings"`
+	PlayerMetrics PlayerFightMetrics       `json:"playerMetrics"`
+	CohortStats   CohortStatistics         `json:"cohortStats"`
+	Deltas        MetricDeltas             `json:"deltas"`
+	Rankings      MetricRankings           `json:"rankings"`
 	AbilityUsage  []AbilityUsageComparison `json:"abilityUsage"`
 	BuffUptimes   []BuffUptimeComparison   `json:"buffUptimes"`
 }
@@ -269,12 +269,20 @@ type insightMetric struct {
 }
 
 type insightHighlight struct {
-	Name        string  `json:"name"`
-	PlayerValue float64 `json:"playerValue"`
-	EliteValue  float64 `json:"eliteValue"`
-	Difference  float64 `json:"difference"`
-	Unit        string  `json:"unit,omitempty"`
-	Category    string  `json:"category,omitempty"`
+	Name                  string    `json:"name"`
+	PlayerValue           float64   `json:"playerValue"`
+	EliteValue            float64   `json:"eliteValue"`
+	Difference            float64   `json:"difference"`
+	Unit                  string    `json:"unit,omitempty"`
+	PlayerTimingSeconds   float64   `json:"playerTimingSeconds,omitempty"`
+	EliteTimingSeconds    float64   `json:"eliteTimingSeconds,omitempty"`
+	TimingDeltaSeconds    float64   `json:"timingDeltaSeconds,omitempty"`
+	TimingLabel           string    `json:"timingLabel,omitempty"`
+	PlayerUseTimesSeconds []float64 `json:"playerUseTimesSeconds,omitempty"`
+	EliteUseTimesSeconds  []float64 `json:"eliteUseTimesSeconds,omitempty"`
+	PlayerLargestGapSec   float64   `json:"playerLargestGapSeconds,omitempty"`
+	EliteLargestGapSec    float64   `json:"eliteLargestGapSeconds,omitempty"`
+	Category              string    `json:"category,omitempty"`
 }
 
 type AIInsight struct {
@@ -325,20 +333,21 @@ type ReportJob struct {
 }
 
 type reportTimelineData struct {
-	Fight       FightSummary
-	Character   CharacterSummary
-	PlayerData  timelineFightData
-	EliteData   []timelineFightData
+	Fight        FightSummary
+	Character    CharacterSummary
+	PlayerData   timelineFightData
+	EliteData    []timelineFightData
 	EliteEntries []CohortEntry
 }
 
 type timelineFightData struct {
-	PlayerID     int                   `json:"playerId"`
-	FightID      int                   `json:"fightId"`
-	FightStart   time.Time             `json:"fightStart"`
-	FightEnd     time.Time             `json:"fightEnd"`
+	PlayerID     int                    `json:"playerId"`
+	FightID      int                    `json:"fightId"`
+	FightStart   time.Time              `json:"fightStart"`
+	FightEnd     time.Time              `json:"fightEnd"`
 	CastEvents   []timelineAbilityEvent `json:"castEvents"`
 	DamageEvents []timelineAbilityEvent `json:"damageEvents"`
+	BuffEvents   []timelineBuffEvent    `json:"buffEvents"`
 }
 
 type timelineAbilityEvent struct {
@@ -349,6 +358,12 @@ type timelineAbilityEvent struct {
 type timelineAbility struct {
 	ID   int    `json:"id"`
 	Name string `json:"name"`
+}
+
+type timelineBuffEvent struct {
+	Timestamp time.Time       `json:"timestamp"`
+	Ability   timelineAbility `json:"ability"`
+	EventType string          `json:"eventType"`
 }
 
 type ReportJobProgress struct {
@@ -404,7 +419,7 @@ func (s *ReportService) CreateJob(req GenerateReportRequest) (ReportJob, error) 
 		Character: req.Character,
 		Progress: ReportJobProgress{
 			Current: 0,
-		Total:   5,
+			Total:   5,
 		},
 		CreatedAt: time.Now().UTC(),
 		UpdatedAt: time.Now().UTC(),
@@ -573,7 +588,7 @@ func (s *ReportService) runJob(jobID string, req GenerateReportRequest) {
 	}
 
 	s.updateJob(jobID, ReportJobRunning, "insights", "Generating AI insights.", ReportJobProgress{Current: 5, Total: 5}, "", &response)
-	insights, err := s.fetchInsights(ctx, req, response.Comparison)
+	insights, err := s.fetchInsights(ctx, req, response.Comparison, playerTimelineData, cohortTimelineData)
 	if err != nil {
 		fmt.Printf("AI insights unavailable for job %s: %v\n", jobID, err)
 		response.AI.Warning = "AI insights were unavailable. Deterministic metrics are still shown."
@@ -717,13 +732,13 @@ func (s *ReportService) fetchComparison(ctx context.Context, playerData json.Raw
 	return comparison, err
 }
 
-func (s *ReportService) fetchInsights(ctx context.Context, req GenerateReportRequest, comparison ComparisonResult) (insightGenerationResponse, error) {
+func (s *ReportService) fetchInsights(ctx context.Context, req GenerateReportRequest, comparison ComparisonResult, playerData timelineFightData, eliteData []timelineFightData) (insightGenerationResponse, error) {
 	var insights insightGenerationResponse
 	err := s.postForJSON(
 		ctx,
 		s.aiClient,
 		s.aiURL+"/insights/generate",
-		buildInsightRequest(req, comparison),
+		buildInsightRequest(req, comparison, playerData, eliteData),
 		&insights,
 		"ai-service",
 	)
@@ -769,7 +784,7 @@ func (s *ReportService) postForJSON(ctx context.Context, client *http.Client, en
 	return json.Unmarshal(bodyBytes, target)
 }
 
-func buildInsightRequest(req GenerateReportRequest, comparison ComparisonResult) insightGenerationRequest {
+func buildInsightRequest(req GenerateReportRequest, comparison ComparisonResult, playerData timelineFightData, eliteData []timelineFightData) insightGenerationRequest {
 	return insightGenerationRequest{
 		Context: insightContext{
 			EncounterName:    req.Fight.Name,
@@ -780,15 +795,9 @@ func buildInsightRequest(req GenerateReportRequest, comparison ComparisonResult)
 			FightDurationSec: req.Fight.KillTime,
 			CohortSize:       comparison.CohortStats.SampleSize,
 		},
-		Metrics: []insightMetric{
-			{Key: "castsPerMin", Label: "Casts per Minute", HigherIsBetter: true, PlayerValue: comparison.Deltas.CastsPerMin.PlayerValue, CohortValue: comparison.Deltas.CastsPerMin.CohortValue, Difference: comparison.Deltas.CastsPerMin.Difference, Percentile: clampPercentile(comparison.Deltas.CastsPerMin.Percentile), Confidence: comparison.Deltas.CastsPerMin.Confidence, Caution: comparison.Deltas.CastsPerMin.Caution},
-			{Key: "majorCdCount", Label: "Major Cooldown Count", HigherIsBetter: true, PlayerValue: comparison.Deltas.MajorCDCount.PlayerValue, CohortValue: comparison.Deltas.MajorCDCount.CohortValue, Difference: comparison.Deltas.MajorCDCount.Difference, Percentile: clampPercentile(comparison.Deltas.MajorCDCount.Percentile), Confidence: comparison.Deltas.MajorCDCount.Confidence, Caution: comparison.Deltas.MajorCDCount.Caution},
-			{Key: "majorCdDrift", Label: "Major Cooldown Timing Drift", Unit: "s", HigherIsBetter: false, PlayerValue: comparison.Deltas.MajorCDDrift.PlayerValue, CohortValue: comparison.Deltas.MajorCDDrift.CohortValue, Difference: comparison.Deltas.MajorCDDrift.Difference, Percentile: clampPercentile(comparison.Deltas.MajorCDDrift.Percentile), Confidence: comparison.Deltas.MajorCDDrift.Confidence, Caution: comparison.Deltas.MajorCDDrift.Caution},
-			{Key: "buffUptime", Label: "Buff Uptime", Unit: "%", HigherIsBetter: true, PlayerValue: comparison.Deltas.BuffUptime.PlayerValue, CohortValue: comparison.Deltas.BuffUptime.CohortValue, Difference: comparison.Deltas.BuffUptime.Difference, Percentile: clampPercentile(comparison.Deltas.BuffUptime.Percentile), Confidence: comparison.Deltas.BuffUptime.Confidence, Caution: comparison.Deltas.BuffUptime.Caution},
-			{Key: "downtimePct", Label: "Downtime Percentage", Unit: "%", HigherIsBetter: false, PlayerValue: comparison.Deltas.DowntimePct.PlayerValue, CohortValue: comparison.Deltas.DowntimePct.CohortValue, Difference: comparison.Deltas.DowntimePct.Difference, Percentile: clampPercentile(comparison.Deltas.DowntimePct.Percentile), Confidence: comparison.Deltas.DowntimePct.Confidence, Caution: comparison.Deltas.DowntimePct.Caution},
-		},
-		AbilityHighlights: buildAbilityHighlights(comparison.AbilityUsage, 5, req.Character.Class, req.Character.Spec),
-		BuffHighlights:    buildBuffHighlights(comparison.BuffUptimes, 5, req.Character.Class, req.Character.Spec),
+		Metrics:           nil,
+		AbilityHighlights: buildAbilityHighlights(comparison.AbilityUsage, 5, req.Character.Class, req.Character.Spec, playerData, eliteData),
+		BuffHighlights:    buildBuffHighlights(comparison.BuffUptimes, 5, req.Character.Class, req.Character.Spec, playerData, eliteData),
 	}
 }
 
@@ -858,7 +867,7 @@ func clampPercentile(value float64) float64 {
 	return value
 }
 
-func buildAbilityHighlights(values []AbilityUsageComparison, limit int, characterClass, characterSpec string) []insightHighlight {
+func buildAbilityHighlights(values []AbilityUsageComparison, limit int, characterClass, characterSpec string, playerData timelineFightData, eliteData []timelineFightData) []insightHighlight {
 	if len(values) == 0 || limit <= 0 {
 		return nil
 	}
@@ -867,12 +876,18 @@ func buildAbilityHighlights(values []AbilityUsageComparison, limit int, characte
 	highlights := make([]insightHighlight, 0, limit)
 	for _, value := range orderedValues {
 		highlights = append(highlights, insightHighlight{
-			Name:        value.AbilityName,
-			PlayerValue: float64(value.PlayerCount),
-			EliteValue:  value.CohortMedianCount,
-			Difference:  value.CountDelta,
-			Unit:        "casts",
-			Category:    categories[normalizeTrackedCooldownName(value.AbilityName)],
+			Name:                  value.AbilityName,
+			PlayerValue:           float64(value.PlayerCount),
+			EliteValue:            value.CohortMedianCount,
+			Difference:            value.CountDelta,
+			Unit:                  "casts",
+			PlayerTimingSeconds:   value.PlayerFirstUseSeconds,
+			EliteTimingSeconds:    value.CohortMedianFirstUseSec,
+			TimingDeltaSeconds:    value.FirstUseDeltaSeconds,
+			TimingLabel:           "first use",
+			PlayerUseTimesSeconds: abilityUseTimesSeconds(playerData, value.AbilityID, 3),
+			EliteUseTimesSeconds:  eliteMedianUseTimesSeconds(eliteData, value.AbilityID, 3),
+			Category:              categories[normalizeTrackedCooldownName(value.AbilityName)],
 		})
 		if len(highlights) == limit {
 			break
@@ -882,7 +897,7 @@ func buildAbilityHighlights(values []AbilityUsageComparison, limit int, characte
 	return highlights
 }
 
-func buildBuffHighlights(values []BuffUptimeComparison, limit int, characterClass, characterSpec string) []insightHighlight {
+func buildBuffHighlights(values []BuffUptimeComparison, limit int, characterClass, characterSpec string, playerData timelineFightData, eliteData []timelineFightData) []insightHighlight {
 	if len(values) == 0 || limit <= 0 {
 		return nil
 	}
@@ -891,12 +906,18 @@ func buildBuffHighlights(values []BuffUptimeComparison, limit int, characterClas
 	highlights := make([]insightHighlight, 0, limit)
 	for _, value := range orderedValues {
 		highlights = append(highlights, insightHighlight{
-			Name:        value.AbilityName,
-			PlayerValue: value.PlayerUptimePct,
-			EliteValue:  value.CohortMedianUptimePct,
-			Difference:  value.UptimeDelta,
-			Unit:        "%",
-			Category:    categories[normalizeTrackedCooldownName(value.AbilityName)],
+			Name:                value.AbilityName,
+			PlayerValue:         value.PlayerUptimePct,
+			EliteValue:          value.CohortMedianUptimePct,
+			Difference:          value.UptimeDelta,
+			Unit:                "%",
+			PlayerTimingSeconds: value.PlayerFirstApplySeconds,
+			EliteTimingSeconds:  value.CohortMedianFirstApply,
+			TimingDeltaSeconds:  value.FirstApplyDeltaSeconds,
+			TimingLabel:         "first apply",
+			PlayerLargestGapSec: largestBuffGapSeconds(playerData, value.AbilityID),
+			EliteLargestGapSec:  medianLargestBuffGapSeconds(eliteData, value.AbilityID),
+			Category:            categories[normalizeTrackedCooldownName(value.AbilityName)],
 		})
 		if len(highlights) == limit {
 			break
@@ -904,6 +925,159 @@ func buildBuffHighlights(values []BuffUptimeComparison, limit int, characterClas
 	}
 
 	return highlights
+}
+
+func abilityUseTimesSeconds(data timelineFightData, abilityID int, limit int) []float64 {
+	if limit <= 0 {
+		return nil
+	}
+
+	casts := buildAbilityTimelineSeries(data, abilityID, "", "", "").CastsMS
+	if len(casts) == 0 {
+		return nil
+	}
+	if len(casts) > limit {
+		casts = casts[:limit]
+	}
+
+	values := make([]float64, 0, len(casts))
+	for _, cast := range casts {
+		values = append(values, float64(cast)/1000)
+	}
+	return values
+}
+
+func eliteMedianUseTimesSeconds(values []timelineFightData, abilityID int, limit int) []float64 {
+	if limit <= 0 {
+		return nil
+	}
+
+	useTimesByElite := make([][]float64, 0, len(values))
+	maxUses := 0
+	for _, value := range values {
+		useTimes := abilityUseTimesSeconds(value, abilityID, limit)
+		if len(useTimes) == 0 {
+			continue
+		}
+		useTimesByElite = append(useTimesByElite, useTimes)
+		if len(useTimes) > maxUses {
+			maxUses = len(useTimes)
+		}
+	}
+
+	if len(useTimesByElite) == 0 {
+		return nil
+	}
+
+	medians := make([]float64, 0, maxUses)
+	for useIndex := 0; useIndex < maxUses; useIndex++ {
+		samples := make([]float64, 0, len(useTimesByElite))
+		for _, useTimes := range useTimesByElite {
+			if useIndex < len(useTimes) {
+				samples = append(samples, useTimes[useIndex])
+			}
+		}
+		if len(samples) == 0 {
+			continue
+		}
+		medians = append(medians, medianFloat64(samples))
+	}
+
+	return medians
+}
+
+func largestBuffGapSeconds(data timelineFightData, abilityID int) float64 {
+	windows := buffWindows(data, abilityID)
+	if len(windows) == 0 {
+		return data.FightEnd.Sub(data.FightStart).Seconds()
+	}
+
+	largestGap := windows[0].start.Sub(data.FightStart).Seconds()
+	previousEnd := data.FightStart
+	for _, window := range windows {
+		gap := window.start.Sub(previousEnd).Seconds()
+		if gap > largestGap {
+			largestGap = gap
+		}
+		previousEnd = window.end
+	}
+	finalGap := data.FightEnd.Sub(previousEnd).Seconds()
+	if finalGap > largestGap {
+		largestGap = finalGap
+	}
+	if largestGap < 0 {
+		return 0
+	}
+	return largestGap
+}
+
+func medianLargestBuffGapSeconds(values []timelineFightData, abilityID int) float64 {
+	samples := make([]float64, 0, len(values))
+	for _, value := range values {
+		samples = append(samples, largestBuffGapSeconds(value, abilityID))
+	}
+	if len(samples) == 0 {
+		return 0
+	}
+	return medianFloat64(samples)
+}
+
+type buffWindow struct {
+	start time.Time
+	end   time.Time
+}
+
+func buffWindows(data timelineFightData, abilityID int) []buffWindow {
+	if len(data.BuffEvents) == 0 {
+		return nil
+	}
+
+	windows := make([]buffWindow, 0)
+	active := false
+	start := data.FightStart
+
+	for _, event := range data.BuffEvents {
+		if event.Ability.ID != abilityID {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(event.EventType)) {
+		case "apply":
+			if !active {
+				active = true
+				start = event.Timestamp
+			}
+		case "refresh":
+			if !active {
+				active = true
+				start = event.Timestamp
+			}
+		case "remove":
+			if active {
+				windows = append(windows, buffWindow{start: start, end: event.Timestamp})
+				active = false
+			}
+		}
+	}
+
+	if active {
+		windows = append(windows, buffWindow{start: start, end: data.FightEnd})
+	}
+
+	return windows
+}
+
+func medianFloat64(values []float64) float64 {
+	if len(values) == 0 {
+		return 0
+	}
+
+	ordered := append([]float64(nil), values...)
+	sort.Float64s(ordered)
+	middle := len(ordered) / 2
+	if len(ordered)%2 == 1 {
+		return ordered[middle]
+	}
+	return (ordered[middle-1] + ordered[middle]) / 2
 }
 
 func orderAbilityHighlights(values []AbilityUsageComparison, characterClass, characterSpec string) ([]AbilityUsageComparison, map[string]string) {
