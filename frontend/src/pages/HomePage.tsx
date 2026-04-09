@@ -2,37 +2,9 @@ import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "../components/ui/Button";
 import { usePageTitle } from "../hooks/usePageTitle";
+import { getCharacterCardClasses } from "../lib/characterPresentation";
 import { getAuthStatus, getBrowserCharacters } from "../lib/api";
 import { useBrowserStore } from "../stores/useBrowserStore";
-
-function getClassBorderClasses(characterClass: string) {
-    const palette: Record<string, string> = {
-        "Death Knight":
-            "border-red-700/60 bg-slate-950/80 hover:border-red-500/70",
-        "Demon Hunter":
-            "border-violet-700/60 bg-slate-950/80 hover:border-violet-500/70",
-        Druid: "border-orange-700/60 bg-slate-950/80 hover:border-orange-500/70",
-        Evoker:
-            "border-emerald-700/60 bg-slate-950/80 hover:border-emerald-500/70",
-        Hunter: "border-lime-700/60 bg-slate-950/80 hover:border-lime-500/70",
-        Mage: "border-sky-700/60 bg-slate-950/80 hover:border-sky-400/70",
-        Monk: "border-teal-700/60 bg-slate-950/80 hover:border-teal-500/70",
-        Paladin: "border-pink-700/60 bg-slate-950/80 hover:border-pink-400/70",
-        Priest:
-            "border-stone-600/70 bg-slate-950/80 hover:border-stone-300/70",
-        Rogue: "border-amber-700/60 bg-slate-950/80 hover:border-amber-400/70",
-        Shaman: "border-blue-700/60 bg-slate-950/80 hover:border-blue-500/70",
-        Warlock:
-            "border-fuchsia-700/60 bg-slate-950/80 hover:border-fuchsia-500/70",
-        Warrior:
-            "border-yellow-800/80 bg-slate-950/80 hover:border-yellow-700/80",
-    };
-
-    return (
-        palette[characterClass] ??
-        "border-slate-700 bg-slate-950/80 hover:border-slate-500"
-    );
-}
 
 export function HomePage() {
     usePageTitle("Home");
@@ -122,8 +94,8 @@ export function HomePage() {
                     Sign in with Warcraft Logs.
                 </h1>
                 <p className="mt-4 max-w-2xl text-slate-300">
-                    After you log in, choose one of your characters and browse
-                    recent reports without pasting URLs manually.
+                    After you log in, choose one of your characters and select
+                    one of their recent reports without pasting URLs manually.
                 </p>
             </div>
 
@@ -173,7 +145,7 @@ export function HomePage() {
                             Your characters
                         </h2>
                         <p className="mt-4 text-slate-300">
-                            Pick a character to browse recent logs.
+                            Pick a character to select from recent logs.
                         </p>
 
                         {isCharactersLoading ? (
@@ -194,7 +166,7 @@ export function HomePage() {
                                         onClick={() =>
                                             handleCharacterClick(character.id)
                                         }
-                                        className={`rounded-3xl border-2 p-6 text-left transition ${getClassBorderClasses(
+                                        className={`rounded-3xl border-2 p-6 text-left transition ${getCharacterCardClasses(
                                             character.class,
                                         )}`}
                                     >

@@ -87,7 +87,7 @@ export function AppShell() {
                                 to="/analyze"
                                 className="rounded-md bg-slate-800 px-4 py-2 text-sm font-medium text-slate-100 hover:bg-slate-700"
                             >
-                                Analyze
+                                Select
                             </Link>
                             <Link
                                 to="/report"

@@ -89,6 +89,9 @@ func validateInsightRequest(req types.InsightGenerationRequest) error {
 		if strings.TrimSpace(highlight.Name) == "" {
 			return errors.New("highlight name is required")
 		}
+		if highlight.Category != "" && highlight.Category != "offensive" && highlight.Category != "defensive" {
+			return fmt.Errorf("highlight %s category must be offensive or defensive when provided", highlight.Name)
+		}
 	}
 
 	return nil
@@ -318,11 +321,15 @@ func buildPrompt(req types.InsightGenerationRequest) string {
 
 	var abilityLines []string
 	for _, highlight := range req.AbilityHighlights {
+		label := highlight.Name
+		if highlight.Category != "" {
+			label = fmt.Sprintf("[%s] %s", highlight.Category, highlight.Name)
+		}
 		abilityLines = append(
 			abilityLines,
 			fmt.Sprintf(
 				"- %s: player=%s, elite=%s, delta=%s",
-				highlight.Name,
+				label,
 				formatValue(highlight.PlayerValue, highlight.Unit),
 				formatValue(highlight.EliteValue, highlight.Unit),
 				formatSigned(highlight.Difference, highlight.Unit),
@@ -332,11 +339,15 @@ func buildPrompt(req types.InsightGenerationRequest) string {
 
 	var buffLines []string
 	for _, highlight := range req.BuffHighlights {
+		label := highlight.Name
+		if highlight.Category != "" {
+			label = fmt.Sprintf("[%s] %s", highlight.Category, highlight.Name)
+		}
 		buffLines = append(
 			buffLines,
 			fmt.Sprintf(
 				"- %s: player=%s, elite=%s, delta=%s",
-				highlight.Name,
+				label,
 				formatValue(highlight.PlayerValue, highlight.Unit),
 				formatValue(highlight.EliteValue, highlight.Unit),
 				formatSigned(highlight.Difference, highlight.Unit),

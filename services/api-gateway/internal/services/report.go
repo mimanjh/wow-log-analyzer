@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -273,6 +274,7 @@ type insightHighlight struct {
 	EliteValue  float64 `json:"eliteValue"`
 	Difference  float64 `json:"difference"`
 	Unit        string  `json:"unit,omitempty"`
+	Category    string  `json:"category,omitempty"`
 }
 
 type AIInsight struct {
@@ -366,6 +368,11 @@ type ReportService struct {
 	jobs  map[string]ReportJob
 }
 
+const (
+	targetEliteCount    = 10
+	rankingCandidateCap = 25
+)
+
 func NewReportService(logURL, analysisURL, aiURL string) *ReportService {
 	const serviceTimeout = 120 * time.Second
 
@@ -397,7 +404,7 @@ func (s *ReportService) CreateJob(req GenerateReportRequest) (ReportJob, error) 
 		Character: req.Character,
 		Progress: ReportJobProgress{
 			Current: 0,
-			Total:   5,
+		Total:   5,
 		},
 		CreatedAt: time.Now().UTC(),
 		UpdatedAt: time.Now().UTC(),
@@ -531,6 +538,9 @@ func (s *ReportService) runJob(jobID string, req GenerateReportRequest) {
 		cohortData = append(cohortData, memberData)
 		cohortEntries = append(cohortEntries, buildCohortEntry(candidate))
 		cohortTimelineData = append(cohortTimelineData, decodedTimeline)
+		if len(cohortData) == targetEliteCount {
+			break
+		}
 	}
 	if len(cohortData) == 0 {
 		s.updateJob(jobID, ReportJobFailed, "cohort", "Failed to collect any cohort members.", ReportJobProgress{Current: len(candidates), Total: len(candidates)}, "no cohort member data could be fetched", nil)
@@ -651,169 +661,112 @@ func newJobID() string {
 }
 
 func (s *ReportService) fetchPlayerData(ctx context.Context, req GenerateReportRequest) (json.RawMessage, error) {
-	body, err := json.Marshal(logComparisonRequest{
-		Fight:       req.Fight,
-		CharacterID: req.Character.ID,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/reports/%s/player-data", s.logURL, req.ReportID), bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := s.logClient.Do(httpReq)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("log-service returned status %d: %s", resp.StatusCode, string(bodyBytes))
-	}
-
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	return json.RawMessage(bodyBytes), nil
+	return s.postForRaw(
+		ctx,
+		s.logClient,
+		fmt.Sprintf("%s/reports/%s/player-data", s.logURL, req.ReportID),
+		logComparisonRequest{
+			Fight:       req.Fight,
+			CharacterID: req.Character.ID,
+		},
+		"log-service",
+	)
 }
 
 func (s *ReportService) fetchRankingCandidates(ctx context.Context, req GenerateReportRequest) ([]RankingCandidate, error) {
-	body, err := json.Marshal(logRankingCandidatesRequest{
-		Fight:          req.Fight,
-		CharacterClass: req.Character.Class,
-		CharacterSpec:  req.Character.Spec,
-		Limit:          10,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, s.logURL+"/rankings/candidates", bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := s.logClient.Do(httpReq)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("log-service returned status %d: %s", resp.StatusCode, string(bodyBytes))
-	}
-
 	var candidates []RankingCandidate
-	if err := json.NewDecoder(resp.Body).Decode(&candidates); err != nil {
-		return nil, err
-	}
-
-	return candidates, nil
+	err := s.postForJSON(
+		ctx,
+		s.logClient,
+		s.logURL+"/rankings/candidates",
+		logRankingCandidatesRequest{
+			Fight:          req.Fight,
+			CharacterClass: req.Character.Class,
+			CharacterSpec:  req.Character.Spec,
+			Limit:          rankingCandidateCap,
+		},
+		&candidates,
+		"log-service",
+	)
+	return candidates, err
 }
 
 func (s *ReportService) fetchCohortMember(ctx context.Context, candidate RankingCandidate) (json.RawMessage, error) {
-	body, err := json.Marshal(logCohortMemberRequest{Candidate: candidate})
+	return s.postForRaw(
+		ctx,
+		s.logClient,
+		s.logURL+"/cohort/member-data",
+		logCohortMemberRequest{Candidate: candidate},
+		"log-service",
+	)
+}
+
+func (s *ReportService) fetchComparison(ctx context.Context, playerData json.RawMessage, cohortData []json.RawMessage) (ComparisonResult, error) {
+	var comparison ComparisonResult
+	err := s.postForJSON(
+		ctx,
+		s.analysisClient,
+		s.analysisURL+"/analyze/compare",
+		analysisCompareRequest{
+			PlayerData: playerData,
+			CohortData: cohortData,
+		},
+		&comparison,
+		"analysis-service",
+	)
+	return comparison, err
+}
+
+func (s *ReportService) fetchInsights(ctx context.Context, req GenerateReportRequest, comparison ComparisonResult) (insightGenerationResponse, error) {
+	var insights insightGenerationResponse
+	err := s.postForJSON(
+		ctx,
+		s.aiClient,
+		s.aiURL+"/insights/generate",
+		buildInsightRequest(req, comparison),
+		&insights,
+		"ai-service",
+	)
+	return insights, err
+}
+
+func (s *ReportService) postForRaw(ctx context.Context, client *http.Client, endpoint string, payload interface{}, serviceName string) (json.RawMessage, error) {
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, s.logURL+"/cohort/member-data", bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
-	resp, err := s.logClient.Do(httpReq)
+	resp, err := client.Do(httpReq)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("log-service returned status %d: %s", resp.StatusCode, string(bodyBytes))
-	}
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
 
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("%s returned status %d: %s", serviceName, resp.StatusCode, string(bodyBytes))
+	}
+
 	return json.RawMessage(bodyBytes), nil
 }
 
-func (s *ReportService) fetchComparison(ctx context.Context, playerData json.RawMessage, cohortData []json.RawMessage) (ComparisonResult, error) {
-	body, err := json.Marshal(analysisCompareRequest{
-		PlayerData: playerData,
-		CohortData: cohortData,
-	})
+func (s *ReportService) postForJSON(ctx context.Context, client *http.Client, endpoint string, payload, target interface{}, serviceName string) error {
+	bodyBytes, err := s.postForRaw(ctx, client, endpoint, payload, serviceName)
 	if err != nil {
-		return ComparisonResult{}, err
+		return err
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, s.analysisURL+"/analyze/compare", bytes.NewReader(body))
-	if err != nil {
-		return ComparisonResult{}, err
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := s.analysisClient.Do(httpReq)
-	if err != nil {
-		return ComparisonResult{}, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return ComparisonResult{}, fmt.Errorf("analysis-service returned status %d: %s", resp.StatusCode, string(bodyBytes))
-	}
-
-	var comparison ComparisonResult
-	if err := json.NewDecoder(resp.Body).Decode(&comparison); err != nil {
-		return ComparisonResult{}, err
-	}
-
-	return comparison, nil
-}
-
-func (s *ReportService) fetchInsights(ctx context.Context, req GenerateReportRequest, comparison ComparisonResult) (insightGenerationResponse, error) {
-	body, err := json.Marshal(buildInsightRequest(req, comparison))
-	if err != nil {
-		return insightGenerationResponse{}, err
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, s.aiURL+"/insights/generate", bytes.NewReader(body))
-	if err != nil {
-		return insightGenerationResponse{}, err
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := s.aiClient.Do(httpReq)
-	if err != nil {
-		return insightGenerationResponse{}, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return insightGenerationResponse{}, fmt.Errorf("ai-service returned status %d: %s", resp.StatusCode, string(bodyBytes))
-	}
-
-	var insights insightGenerationResponse
-	if err := json.NewDecoder(resp.Body).Decode(&insights); err != nil {
-		return insightGenerationResponse{}, err
-	}
-
-	return insights, nil
+	return json.Unmarshal(bodyBytes, target)
 }
 
 func buildInsightRequest(req GenerateReportRequest, comparison ComparisonResult) insightGenerationRequest {
@@ -834,8 +787,8 @@ func buildInsightRequest(req GenerateReportRequest, comparison ComparisonResult)
 			{Key: "buffUptime", Label: "Buff Uptime", Unit: "%", HigherIsBetter: true, PlayerValue: comparison.Deltas.BuffUptime.PlayerValue, CohortValue: comparison.Deltas.BuffUptime.CohortValue, Difference: comparison.Deltas.BuffUptime.Difference, Percentile: clampPercentile(comparison.Deltas.BuffUptime.Percentile), Confidence: comparison.Deltas.BuffUptime.Confidence, Caution: comparison.Deltas.BuffUptime.Caution},
 			{Key: "downtimePct", Label: "Downtime Percentage", Unit: "%", HigherIsBetter: false, PlayerValue: comparison.Deltas.DowntimePct.PlayerValue, CohortValue: comparison.Deltas.DowntimePct.CohortValue, Difference: comparison.Deltas.DowntimePct.Difference, Percentile: clampPercentile(comparison.Deltas.DowntimePct.Percentile), Confidence: comparison.Deltas.DowntimePct.Confidence, Caution: comparison.Deltas.DowntimePct.Caution},
 		},
-		AbilityHighlights: buildAbilityHighlights(comparison.AbilityUsage, 5),
-		BuffHighlights:    buildBuffHighlights(comparison.BuffUptimes, 5),
+		AbilityHighlights: buildAbilityHighlights(comparison.AbilityUsage, 5, req.Character.Class, req.Character.Spec),
+		BuffHighlights:    buildBuffHighlights(comparison.BuffUptimes, 5, req.Character.Class, req.Character.Spec),
 	}
 }
 
@@ -905,19 +858,21 @@ func clampPercentile(value float64) float64 {
 	return value
 }
 
-func buildAbilityHighlights(values []AbilityUsageComparison, limit int) []insightHighlight {
+func buildAbilityHighlights(values []AbilityUsageComparison, limit int, characterClass, characterSpec string) []insightHighlight {
 	if len(values) == 0 || limit <= 0 {
 		return nil
 	}
 
+	orderedValues, categories := orderAbilityHighlights(values, characterClass, characterSpec)
 	highlights := make([]insightHighlight, 0, limit)
-	for _, value := range values {
+	for _, value := range orderedValues {
 		highlights = append(highlights, insightHighlight{
 			Name:        value.AbilityName,
 			PlayerValue: float64(value.PlayerCount),
 			EliteValue:  value.CohortMedianCount,
 			Difference:  value.CountDelta,
 			Unit:        "casts",
+			Category:    categories[normalizeTrackedCooldownName(value.AbilityName)],
 		})
 		if len(highlights) == limit {
 			break
@@ -927,19 +882,21 @@ func buildAbilityHighlights(values []AbilityUsageComparison, limit int) []insigh
 	return highlights
 }
 
-func buildBuffHighlights(values []BuffUptimeComparison, limit int) []insightHighlight {
+func buildBuffHighlights(values []BuffUptimeComparison, limit int, characterClass, characterSpec string) []insightHighlight {
 	if len(values) == 0 || limit <= 0 {
 		return nil
 	}
 
+	orderedValues, categories := orderBuffHighlights(values, characterClass, characterSpec)
 	highlights := make([]insightHighlight, 0, limit)
-	for _, value := range values {
+	for _, value := range orderedValues {
 		highlights = append(highlights, insightHighlight{
 			Name:        value.AbilityName,
 			PlayerValue: value.PlayerUptimePct,
 			EliteValue:  value.CohortMedianUptimePct,
 			Difference:  value.UptimeDelta,
 			Unit:        "%",
+			Category:    categories[normalizeTrackedCooldownName(value.AbilityName)],
 		})
 		if len(highlights) == limit {
 			break
@@ -947,4 +904,60 @@ func buildBuffHighlights(values []BuffUptimeComparison, limit int) []insightHigh
 	}
 
 	return highlights
+}
+
+func orderAbilityHighlights(values []AbilityUsageComparison, characterClass, characterSpec string) ([]AbilityUsageComparison, map[string]string) {
+	prioritySet := specPriorityFor(characterClass, characterSpec)
+	return orderTrackedAbilities(values, prioritySet), buildCooldownCategoryMap(prioritySet)
+}
+
+func orderBuffHighlights(values []BuffUptimeComparison, characterClass, characterSpec string) ([]BuffUptimeComparison, map[string]string) {
+	prioritySet := specPriorityFor(characterClass, characterSpec)
+	return orderTrackedBuffs(values, prioritySet), buildCooldownCategoryMap(prioritySet)
+}
+
+func orderTrackedAbilities(values []AbilityUsageComparison, prioritySet specPrioritySet) []AbilityUsageComparison {
+	order := append(append([]string{}, prioritySet.Offensives...), prioritySet.Defensives...)
+	indexByName := make(map[string]int, len(order))
+	for index, value := range order {
+		indexByName[normalizeTrackedCooldownName(value)] = index
+	}
+
+	ordered := append([]AbilityUsageComparison(nil), values...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		leftIndex, leftTracked := indexByName[normalizeTrackedCooldownName(ordered[i].AbilityName)]
+		rightIndex, rightTracked := indexByName[normalizeTrackedCooldownName(ordered[j].AbilityName)]
+		if leftTracked && rightTracked {
+			return leftIndex < rightIndex
+		}
+		if leftTracked != rightTracked {
+			return leftTracked
+		}
+		return strings.ToLower(ordered[i].AbilityName) < strings.ToLower(ordered[j].AbilityName)
+	})
+
+	return ordered
+}
+
+func orderTrackedBuffs(values []BuffUptimeComparison, prioritySet specPrioritySet) []BuffUptimeComparison {
+	order := append(append([]string{}, prioritySet.Offensives...), prioritySet.Defensives...)
+	indexByName := make(map[string]int, len(order))
+	for index, value := range order {
+		indexByName[normalizeTrackedCooldownName(value)] = index
+	}
+
+	ordered := append([]BuffUptimeComparison(nil), values...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		leftIndex, leftTracked := indexByName[normalizeTrackedCooldownName(ordered[i].AbilityName)]
+		rightIndex, rightTracked := indexByName[normalizeTrackedCooldownName(ordered[j].AbilityName)]
+		if leftTracked && rightTracked {
+			return leftIndex < rightIndex
+		}
+		if leftTracked != rightTracked {
+			return leftTracked
+		}
+		return strings.ToLower(ordered[i].AbilityName) < strings.ToLower(ordered[j].AbilityName)
+	})
+
+	return ordered
 }

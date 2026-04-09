@@ -36,6 +36,7 @@ type InsightHighlight struct {
 	EliteValue  float64 `json:"eliteValue"`
 	Difference  float64 `json:"difference"`
 	Unit        string  `json:"unit,omitempty"`
+	Category    string  `json:"category,omitempty"`
 }
 
 type InsightGenerationResponse struct {

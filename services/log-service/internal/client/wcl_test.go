@@ -282,3 +282,13 @@ func TestDeriveCharacterClassIDFromRecentReports_FallsBackToExactNameAndServerMa
 		t.Fatalf("expected derived class id 6, got %d", classID)
 	}
 }
+
+func TestNormalizeMatchKeys_IgnoreFormattingDifferences(t *testing.T) {
+	if classMatchKey("Death Knight") != classMatchKey("DeathKnight") {
+		t.Fatalf("expected class match keys to ignore spacing differences")
+	}
+
+	if specMatchKey("Beast Mastery") != specMatchKey("Beast-Mastery") {
+		t.Fatalf("expected spec match keys to ignore punctuation differences")
+	}
+}

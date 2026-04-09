@@ -6,6 +6,16 @@ import { usePageTitle } from "../hooks/usePageTitle";
 import { Button } from "../components/ui/Button";
 import { MetricCard } from "../components/MetricCard";
 import { getAbilityTimeline, getReportJob } from "../lib/api";
+import {
+    confidenceColor,
+    formatKillTime,
+    formatSigned,
+    getStageCompletionState,
+    getStageLabel,
+    matchesFilter,
+    sortByTrackedPriority,
+    type ComparisonFilter,
+} from "../lib/reportPresentation";
 import type {
     AbilityTimelineResponse,
     AbilityTimelineSeries,
@@ -614,107 +624,6 @@ const trackedSpecPriorities: Record<
         buffs: ["Summon Infernal", "Havoc", "Unending Resolve", "Dark Pact"],
     },
 };
-
-function normalizeTrackedName(value: string) {
-    return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
-}
-
-function sortByTrackedPriority<T extends { abilityName: string }>(
-    values: T[],
-    trackedNames: string[],
-) {
-    const priorityByName = new Map(
-        trackedNames.map((name, index) => [normalizeTrackedName(name), index]),
-    );
-
-    return [...values].sort((left, right) => {
-        const leftPriority = priorityByName.get(
-            normalizeTrackedName(left.abilityName),
-        );
-        const rightPriority = priorityByName.get(
-            normalizeTrackedName(right.abilityName),
-        );
-
-        if (leftPriority !== undefined && rightPriority !== undefined) {
-            return leftPriority - rightPriority;
-        }
-        if (leftPriority !== undefined) {
-            return -1;
-        }
-        if (rightPriority !== undefined) {
-            return 1;
-        }
-
-        return left.abilityName.localeCompare(right.abilityName);
-    });
-}
-
-function formatKillTime(seconds: number) {
-    return `${Math.floor(seconds / 60)}:${(seconds % 60)
-        .toString()
-        .padStart(2, "0")}`;
-}
-
-function formatSigned(value: number, unit = "", digits = 1) {
-    const prefix = value > 0 ? "+" : "";
-    return `${prefix}${value.toFixed(digits)}${unit}`;
-}
-
-function confidenceColor(confidence: string) {
-    switch (confidence) {
-        case "high":
-            return "text-emerald-400";
-        case "medium":
-            return "text-amber-400";
-        default:
-            return "text-rose-400";
-    }
-}
-
-type ComparisonFilter = "all" | "behind" | "ahead";
-
-function matchesFilter(delta: number, filter: ComparisonFilter) {
-    if (filter === "behind") {
-        return delta < 0;
-    }
-    if (filter === "ahead") {
-        return delta > 0;
-    }
-    return true;
-}
-
-function getStageLabel(stage: string) {
-    return reportStages.find((entry) => entry.key === stage)?.label ?? stage;
-}
-
-function getStageCompletionState(
-    stage: string,
-    status: ReportJob["status"],
-    key: string,
-) {
-    const stageIndex = reportStages.findIndex((entry) => entry.key === stage);
-    const keyIndex = reportStages.findIndex((entry) => entry.key === key);
-
-    if (status === "completed") {
-        return "complete";
-    }
-    if (status === "failed") {
-        if (keyIndex < stageIndex) {
-            return "complete";
-        }
-        if (key === stage) {
-            return "failed";
-        }
-        return "pending";
-    }
-    if (keyIndex < stageIndex) {
-        return "complete";
-    }
-    if (key === stage) {
-        return "active";
-    }
-    return "pending";
-}
 
 function renderSummaryCard(
     title: string,
