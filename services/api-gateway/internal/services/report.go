@@ -67,12 +67,13 @@ type AIReportSection struct {
 }
 
 type ComparisonResult struct {
-	PlayerMetrics PlayerFightMetrics       `json:"playerMetrics"`
-	CohortStats   CohortStatistics         `json:"cohortStats"`
-	Deltas        MetricDeltas             `json:"deltas"`
-	Rankings      MetricRankings           `json:"rankings"`
-	AbilityUsage  []AbilityUsageComparison `json:"abilityUsage"`
-	BuffUptimes   []BuffUptimeComparison   `json:"buffUptimes"`
+	PlayerMetrics PlayerFightMetrics        `json:"playerMetrics"`
+	CohortStats   CohortStatistics          `json:"cohortStats"`
+	Deltas        MetricDeltas              `json:"deltas"`
+	Rankings      MetricRankings            `json:"rankings"`
+	AbilityUsage  []AbilityUsageComparison  `json:"abilityUsage"`
+	BuffUptimes   []BuffUptimeComparison    `json:"buffUptimes"`
+	ResourceUsage []ResourceUsageComparison `json:"resourceUsage"`
 }
 
 type PlayerFightMetrics struct {
@@ -203,6 +204,23 @@ type BuffUptimeComparison struct {
 	SampleSize              int     `json:"sampleSize"`
 	Confidence              string  `json:"confidence"`
 	Caution                 string  `json:"caution,omitempty"`
+}
+
+type ResourceUsageComparison struct {
+	ResourceTypeID                 int     `json:"resourceTypeId"`
+	ResourceType                   string  `json:"resourceType"`
+	PlayerGeneratedPerMinute       float64 `json:"playerGeneratedPerMinute"`
+	CohortMedianGeneratedPerMinute float64 `json:"cohortMedianGeneratedPerMinute"`
+	GeneratedDelta                 float64 `json:"generatedDelta"`
+	PlayerWastePerMinute           float64 `json:"playerWastePerMinute"`
+	CohortMedianWastePerMinute     float64 `json:"cohortMedianWastePerMinute"`
+	WasteDelta                     float64 `json:"wasteDelta"`
+	PlayerWastePct                 float64 `json:"playerWastePct"`
+	CohortMedianWastePct           float64 `json:"cohortMedianWastePct"`
+	WastePctDelta                  float64 `json:"wastePctDelta"`
+	SampleSize                     int     `json:"sampleSize"`
+	Confidence                     string  `json:"confidence"`
+	Caution                        string  `json:"caution,omitempty"`
 }
 
 type logComparisonRequest struct {

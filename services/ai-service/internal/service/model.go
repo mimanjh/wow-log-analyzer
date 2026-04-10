@@ -51,6 +51,10 @@ type openAIResponsesResponse struct {
 
 func newModelClient(cfg config.Config) ModelClient {
 	provider := strings.ToLower(strings.TrimSpace(cfg.Provider))
+	if !cfg.LiveModelEnabled {
+		return disabledModelClient{}
+	}
+
 	if provider == "" || provider == "disabled" {
 		return disabledModelClient{}
 	}

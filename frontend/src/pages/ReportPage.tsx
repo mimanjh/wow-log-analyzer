@@ -1018,8 +1018,11 @@ export function ReportPage() {
     const [abilityFilter, setAbilityFilter] = useState<ComparisonFilter>("all");
     const [buffSearch, setBuffSearch] = useState("");
     const [buffFilter, setBuffFilter] = useState<ComparisonFilter>("all");
+    const [resourceSearch, setResourceSearch] = useState("");
+    const [resourceFilter, setResourceFilter] = useState<ComparisonFilter>("all");
     const [showAllAbilities, setShowAllAbilities] = useState(false);
     const [showAllBuffs, setShowAllBuffs] = useState(false);
+    const [showAllResources, setShowAllResources] = useState(false);
     const [timelineAbilityId, setTimelineAbilityId] = useState<number | null>(
         null,
     );
@@ -1145,6 +1148,15 @@ export function ReportPage() {
             .includes(buffSearch.trim().toLowerCase());
         return searchMatches && matchesFilter(entry.uptimeDelta, buffFilter);
     });
+    const filteredResourceUsage = comparison.resourceUsage.filter((entry) => {
+        const searchMatches = entry.resourceType
+            .toLowerCase()
+            .includes(resourceSearch.trim().toLowerCase());
+        return (
+            searchMatches &&
+            matchesFilter(entry.wastePctDelta * -1, resourceFilter)
+        );
+    });
     const orderedAbilityUsage = sortByTrackedPriority(
         filteredAbilityUsage,
         trackedPriority.abilities,
@@ -1153,12 +1165,29 @@ export function ReportPage() {
         filteredBuffUptimes,
         trackedPriority.buffs,
     );
+    const orderedResourceUsage = [...filteredResourceUsage].sort(
+        (left, right) => {
+            if (
+                left.cohortMedianGeneratedPerMinute ===
+                right.cohortMedianGeneratedPerMinute
+            ) {
+                return left.resourceType.localeCompare(right.resourceType);
+            }
+            return (
+                right.cohortMedianGeneratedPerMinute -
+                left.cohortMedianGeneratedPerMinute
+            );
+        },
+    );
     const visibleAbilityUsage = showAllAbilities
         ? orderedAbilityUsage
         : orderedAbilityUsage.slice(0, 10);
     const visibleBuffUptimes = showAllBuffs
         ? orderedBuffUptimes
         : orderedBuffUptimes.slice(0, 10);
+    const visibleResourceUsage = showAllResources
+        ? orderedResourceUsage
+        : orderedResourceUsage.slice(0, 10);
     const matchingBrowserCharacter =
         browserSelectedCharacter &&
         browserSelectedCharacter.name === character.name &&
@@ -1650,6 +1679,196 @@ export function ReportPage() {
                         ) : (
                             <p className="text-sm text-slate-300">
                                 No buff uptime comparisons matched this filter.
+                            </p>
+                        )}
+                    </div>
+                </div>
+
+                <div className="space-y-6">
+                    <h2 className="text-xl font-semibold text-white">
+                        Resource Usage
+                    </h2>
+                    <div className="rounded-3xl border border-slate-800 bg-slate-950/80 p-6">
+                        <div className="mb-6 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                            <p className="text-xs text-slate-400">
+                                * generation and waste are normalized by fight
+                                length
+                            </p>
+                            <div className="flex flex-col gap-3 md:flex-row">
+                                <input
+                                    type="text"
+                                    value={resourceSearch}
+                                    onChange={(event) =>
+                                        setResourceSearch(event.target.value)
+                                    }
+                                    placeholder="Filter resources"
+                                    className="w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-sm text-white outline-none transition focus:border-sky-500 md:max-w-sm"
+                                />
+                                <select
+                                    value={resourceFilter}
+                                    onChange={(event) =>
+                                        setResourceFilter(
+                                            event.target
+                                                .value as ComparisonFilter,
+                                        )
+                                    }
+                                    className="rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-sm text-white outline-none transition focus:border-sky-500"
+                                >
+                                    <option value="all">All resources</option>
+                                    <option value="behind">
+                                        Higher waste than elites
+                                    </option>
+                                    <option value="ahead">
+                                        Lower waste than elites
+                                    </option>
+                                </select>
+                            </div>
+                        </div>
+                        {orderedResourceUsage.length > 0 ? (
+                            <div className="overflow-x-auto">
+                                <table className="min-w-full text-left text-sm">
+                                    <thead className="text-slate-400">
+                                        <tr className="border-b border-slate-800">
+                                            <th className="pb-3 pr-4 font-medium">
+                                                Resource
+                                            </th>
+                                            <th className="pb-3 pr-4 font-medium">
+                                                You Gen
+                                            </th>
+                                            <th className="pb-3 pr-4 font-medium">
+                                                Elite Gen
+                                            </th>
+                                            <th className="pb-3 pr-4 font-medium">
+                                                Waste
+                                            </th>
+                                            <th className="pb-3 pr-4 font-medium">
+                                                Waste %
+                                            </th>
+                                            <th className="pb-3 pr-4 font-medium">
+                                                Confidence
+                                            </th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {visibleResourceUsage.map((entry) => (
+                                            <tr
+                                                key={entry.resourceTypeId}
+                                                className="border-b border-slate-900 align-top last:border-b-0"
+                                            >
+                                                <td className="py-4 pr-4">
+                                                    <p className="font-medium text-white">
+                                                        {entry.resourceType}
+                                                    </p>
+                                                    <p className="mt-1 text-xs text-slate-500">
+                                                        {entry.sampleSize} elite
+                                                        samples
+                                                    </p>
+                                                </td>
+                                                <td className="py-4 pr-4 text-slate-200">
+                                                    <p>
+                                                        {entry.playerGeneratedPerMinute.toFixed(
+                                                            2,
+                                                        )}
+                                                    </p>
+                                                    <p className="mt-1 text-xs text-slate-500">
+                                                        {formatSigned(
+                                                            entry.generatedDelta,
+                                                            "",
+                                                            2,
+                                                        )}{" "}
+                                                        vs elite
+                                                    </p>
+                                                </td>
+                                                <td className="py-4 pr-4 text-slate-300">
+                                                    <p>
+                                                        {entry.cohortMedianGeneratedPerMinute.toFixed(
+                                                            2,
+                                                        )}
+                                                    </p>
+                                                </td>
+                                                <td className="py-4 pr-4">
+                                                    <p className="text-slate-200">
+                                                        {entry.playerWastePerMinute.toFixed(
+                                                            2,
+                                                        )}
+                                                    </p>
+                                                    <p
+                                                        className={
+                                                            entry.wasteDelta <=
+                                                            0
+                                                                ? "mt-1 text-xs text-emerald-400"
+                                                                : "mt-1 text-xs text-rose-400"
+                                                        }
+                                                    >
+                                                        {formatSigned(
+                                                            entry.wasteDelta,
+                                                            "",
+                                                            2,
+                                                        )}{" "}
+                                                        vs elite
+                                                    </p>
+                                                </td>
+                                                <td className="py-4 pr-4">
+                                                    <p className="text-slate-200">
+                                                        {entry.playerWastePct.toFixed(
+                                                            1,
+                                                        )}
+                                                        %
+                                                    </p>
+                                                    <p
+                                                        className={
+                                                            entry.wastePctDelta <=
+                                                            0
+                                                                ? "mt-1 text-xs text-emerald-400"
+                                                                : "mt-1 text-xs text-rose-400"
+                                                        }
+                                                    >
+                                                        {formatSigned(
+                                                            entry.wastePctDelta,
+                                                            "%",
+                                                            1,
+                                                        )}{" "}
+                                                        vs elite
+                                                    </p>
+                                                </td>
+                                                <td className="py-4 pr-4">
+                                                    <p
+                                                        className={`font-medium ${confidenceColor(entry.confidence)}`}
+                                                    >
+                                                        {entry.confidence}
+                                                    </p>
+                                                    {entry.caution && (
+                                                        <p className="mt-1 text-xs text-amber-300">
+                                                            {entry.caution}
+                                                        </p>
+                                                    )}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                                {orderedResourceUsage.length > 10 && (
+                                    <div className="mt-4 flex justify-center">
+                                        <Button
+                                            type="button"
+                                            variant="secondary"
+                                            onClick={() =>
+                                                setShowAllResources(
+                                                    (current) => !current,
+                                                )
+                                            }
+                                        >
+                                            {showAllResources
+                                                ? "Show fewer resources"
+                                                : `Show all resources (${orderedResourceUsage.length})`}
+                                        </Button>
+                                    </div>
+                                )}
+                            </div>
+                        ) : (
+                            <p className="text-sm text-slate-300">
+                                No resource usage comparisons matched this
+                                filter.
                             </p>
                         )}
                     </div>

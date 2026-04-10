@@ -106,6 +106,17 @@ type CooldownEvent struct {
 	EventType string    `json:"eventType"`
 }
 
+type ResourceEvent struct {
+	Timestamp      time.Time `json:"timestamp"`
+	SourceID       int       `json:"sourceId"`
+	TargetID       int       `json:"targetId"`
+	ResourceTypeID int       `json:"resourceTypeId"`
+	ResourceType   string    `json:"resourceType"`
+	Change         float64   `json:"change"`
+	Waste          float64   `json:"waste"`
+	MaxAmount      float64   `json:"maxAmount,omitempty"`
+}
+
 type PlayerFightData struct {
 	PlayerID       int             `json:"playerId"`
 	FightID        int             `json:"fightId"`
@@ -116,4 +127,5 @@ type PlayerFightData struct {
 	HealEvents     []HealEvent     `json:"healEvents"`
 	BuffEvents     []BuffEvent     `json:"buffEvents"`
 	CooldownEvents []CooldownEvent `json:"cooldownEvents"`
+	ResourceEvents []ResourceEvent `json:"resourceEvents"`
 }

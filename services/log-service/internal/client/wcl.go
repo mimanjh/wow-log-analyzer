@@ -1000,6 +1000,10 @@ func (c *WCLHTTPClient) fetchPlayerFightData(reportID string, fight types.Normal
 	if err != nil {
 		return types.PlayerFightData{}, err
 	}
+	resourceRaw, err := c.fetchEvents(reportID, "Resources", fight.ID, actorID)
+	if err != nil {
+		return types.PlayerFightData{}, err
+	}
 	buffRaw, err := c.fetchBuffEvents(reportID, fight.ID, actorID)
 	if err != nil {
 		return types.PlayerFightData{}, err
@@ -1015,6 +1019,7 @@ func (c *WCLHTTPClient) fetchPlayerFightData(reportID string, fight types.Normal
 		HealEvents:     normalizeHealEvents(reportMetadata.StartTime.UnixMilli(), healRaw, abilityNames),
 		BuffEvents:     normalizeBuffEvents(reportMetadata.StartTime.UnixMilli(), buffRaw, abilityNames),
 		CooldownEvents: normalizeCooldownEvents(reportMetadata.StartTime.UnixMilli(), castRaw, abilityNames),
+		ResourceEvents: normalizeResourceEvents(reportMetadata.StartTime.UnixMilli(), resourceRaw, actorID),
 	}, nil
 }
 

@@ -8,22 +8,24 @@ import (
 )
 
 type Config struct {
-	Port        string
-	Env         string
-	Provider    string
-	Model       string
-	ModelAPIKey string
+	Port             string
+	Env              string
+	Provider         string
+	Model            string
+	ModelAPIKey      string
+	LiveModelEnabled bool
 }
 
 func Load() Config {
 	loadDotEnv()
 
 	return Config{
-		Port:        firstEnv("PORT", "AI_SERVICE_PORT", "8083"),
-		Env:         getEnv("ENV", "development"),
-		Provider:    getEnv("AI_PROVIDER", "disabled"),
-		Model:       firstEnv("AI_MODEL", "OPENAI_MODEL", "fallback-only"),
-		ModelAPIKey: firstEnv("AI_MODEL_API_KEY", "OPENAI_API_KEY", ""),
+		Port:             firstEnv("PORT", "AI_SERVICE_PORT", "8083"),
+		Env:              getEnv("ENV", "development"),
+		Provider:         getEnv("AI_PROVIDER", "disabled"),
+		Model:            firstEnv("AI_MODEL", "OPENAI_MODEL", "fallback-only"),
+		ModelAPIKey:      firstEnv("AI_MODEL_API_KEY", "OPENAI_API_KEY", ""),
+		LiveModelEnabled: parseBoolEnv("AI_LIVE_MODEL_ENABLED", false),
 	}
 }
 
@@ -103,4 +105,18 @@ func firstEnv(primary, secondary, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func parseBoolEnv(key string, fallback bool) bool {
+	value := strings.TrimSpace(strings.ToLower(os.Getenv(key)))
+	switch value {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	case "":
+		return fallback
+	default:
+		return fallback
+	}
 }

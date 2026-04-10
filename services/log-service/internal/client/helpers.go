@@ -135,6 +135,50 @@ func normalizeCooldownEvents(reportStartTime int64, raw []map[string]interface{}
 	return events
 }
 
+func normalizeResourceEvents(reportStartTime int64, raw []map[string]interface{}, playerID int) []types.ResourceEvent {
+	events := make([]types.ResourceEvent, 0, len(raw))
+
+	for _, event := range raw {
+		resourceTypeID := 0
+		if value, ok := event["resourceChangeType"]; ok {
+			resourceTypeID = parseInt(value)
+		} else if value, ok := event["type"]; ok {
+			resourceTypeID = parseInt(value)
+		} else {
+			continue
+		}
+
+		sourceID := parseActorID(event, "sourceID", "source")
+		targetID := parseActorID(event, "targetID", "target")
+		if playerID != 0 && sourceID != playerID && targetID != playerID {
+			continue
+		}
+
+		change := parseFloat(event["resourceChange"])
+		if change == 0 {
+			change = parseFloat(event["amount"])
+		}
+		waste := parseFloat(event["waste"])
+		maxAmount := parseFloat(event["maxResourceAmount"])
+		if maxAmount == 0 {
+			maxAmount = parseFloat(event["resourceChangeMax"])
+		}
+
+		events = append(events, types.ResourceEvent{
+			Timestamp:      parseTimestamp(reportStartTime, event["timestamp"]),
+			SourceID:       sourceID,
+			TargetID:       targetID,
+			ResourceTypeID: resourceTypeID,
+			ResourceType:   resourceTypeName(resourceTypeID),
+			Change:         change,
+			Waste:          waste,
+			MaxAmount:      maxAmount,
+		})
+	}
+
+	return events
+}
+
 func parseTimestamp(reportStartTime int64, value interface{}) time.Time {
 	ms := absoluteReportTimestamp(reportStartTime, parseInt64(value))
 	if ms <= 0 {
@@ -206,6 +250,74 @@ func parseString(value interface{}) string {
 		return typed
 	default:
 		return ""
+	}
+}
+
+func parseFloat(value interface{}) float64 {
+	switch typed := value.(type) {
+	case float64:
+		return typed
+	case float32:
+		return float64(typed)
+	case int:
+		return float64(typed)
+	case int64:
+		return float64(typed)
+	case json.Number:
+		parsed, _ := typed.Float64()
+		return parsed
+	case string:
+		parsed, _ := strconv.ParseFloat(typed, 64)
+		return parsed
+	default:
+		return 0
+	}
+}
+
+func resourceTypeName(id int) string {
+	switch id {
+	case 0:
+		return "Mana"
+	case 1:
+		return "Rage"
+	case 2:
+		return "Focus"
+	case 3:
+		return "Energy"
+	case 4:
+		return "Combo Points"
+	case 5:
+		return "Runes"
+	case 6:
+		return "Runic Power"
+	case 7:
+		return "Soul Shards"
+	case 8:
+		return "Lunar Power"
+	case 9:
+		return "Holy Power"
+	case 10:
+		return "Alternate Power"
+	case 11:
+		return "Maelstrom"
+	case 12:
+		return "Chi"
+	case 13:
+		return "Insanity"
+	case 14:
+		return "Obsolete"
+	case 15:
+		return "Obsolete 2"
+	case 16:
+		return "Arcane Charges"
+	case 17:
+		return "Fury"
+	case 18:
+		return "Pain"
+	case 19:
+		return "Essence"
+	default:
+		return fmt.Sprintf("Resource %d", id)
 	}
 }
 
@@ -335,7 +447,6 @@ func isRetryableWCLFailure(err error) bool {
 		strings.Contains(message, "status 502") ||
 		strings.Contains(message, "timeout")
 }
-
 
 func classNameFromID(classID int) string {
 	switch classID {

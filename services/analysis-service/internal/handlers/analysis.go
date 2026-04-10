@@ -90,6 +90,7 @@ func (h *AnalysisHandler) CompareFight(w http.ResponseWriter, r *http.Request) {
 
 	comparison.AbilityUsage = h.analysisService.CalculateAbilityUsageComparisons(req.PlayerData, req.CohortData)
 	comparison.BuffUptimes = h.analysisService.CalculateBuffUptimeComparisons(req.PlayerData, req.CohortData)
+	comparison.ResourceUsage = h.analysisService.CalculateResourceUsageComparisons(req.PlayerData, req.CohortData)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(comparison)

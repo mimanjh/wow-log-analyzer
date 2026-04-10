@@ -7,6 +7,7 @@
 AGENTS.md
 MVP_SPEC.md
 PROJECT_CONTEXT.md
+TODO.md
 
 # Frontend
 frontend/node_modules/
@@ -25,3 +26,4 @@ services/**/.gocache/
 Thumbs.db
 .idea/
 .vscode/
+__debug_bin.exe

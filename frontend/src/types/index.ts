@@ -110,6 +110,7 @@ export interface ComparisonResult {
   rankings: MetricRankings
   abilityUsage: AbilityUsageComparison[]
   buffUptimes: BuffUptimeComparison[]
+  resourceUsage: ResourceUsageComparison[]
 }
 
 export interface ReportResult {
@@ -313,6 +314,23 @@ export interface BuffUptimeComparison {
   cohortMedianFirstApplySeconds?: number
   uptimeDelta: number
   firstApplyDeltaSeconds?: number
+  sampleSize: number
+  confidence: string
+  caution?: string
+}
+
+export interface ResourceUsageComparison {
+  resourceTypeId: number
+  resourceType: string
+  playerGeneratedPerMinute: number
+  cohortMedianGeneratedPerMinute: number
+  generatedDelta: number
+  playerWastePerMinute: number
+  cohortMedianWastePerMinute: number
+  wasteDelta: number
+  playerWastePct: number
+  cohortMedianWastePct: number
+  wastePctDelta: number
   sampleSize: number
   confidence: string
   caution?: string
