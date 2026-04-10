@@ -43,6 +43,9 @@ func (s *InsightService) GenerateInsights(ctx context.Context, req types.Insight
 			}
 			return *response, nil
 		}
+		if err != nil {
+			fmt.Printf("ai-service model generation failed: %v\n", err)
+		}
 	}
 
 	fallback := formatFallbackInsights(req)
@@ -561,12 +564,22 @@ func formatAbilityHighlightLine(highlight types.InsightHighlight) string {
 		)
 	}
 
+	countPart := ""
+	if highlight.PlayerRawCount > 0 || highlight.EliteRawCount > 0 {
+		countPart = fmt.Sprintf(
+			", player count=%s, elite median count=%s",
+			formatValue(highlight.PlayerRawCount, "casts"),
+			formatValue(highlight.EliteRawCount, "casts"),
+		)
+	}
+
 	return fmt.Sprintf(
-		"- %s: player=%s, elite=%s, delta=%s%s",
+		"- %s: player=%s, elite=%s, delta=%s%s%s",
 		label,
 		formatValue(highlight.PlayerValue, highlight.Unit),
 		formatValue(highlight.EliteValue, highlight.Unit),
 		formatSigned(highlight.Difference, highlight.Unit),
+		countPart,
 		timingPart,
 	)
 }

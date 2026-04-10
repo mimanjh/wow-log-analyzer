@@ -17,6 +17,7 @@ func main() {
 	handlers.RegisterRoutes(mux, insightService)
 
 	serverAddr := fmt.Sprintf(":%s", cfg.Port)
+	log.Printf("ai-service config: provider=%s model=%s apiKeyConfigured=%t", cfg.Provider, cfg.Model, cfg.ModelAPIKey != "")
 	log.Printf("ai-service starting on %s", serverAddr)
 	if err := http.ListenAndServe(serverAddr, mux); err != nil {
 		log.Fatalf("ai-service server failed: %v", err)

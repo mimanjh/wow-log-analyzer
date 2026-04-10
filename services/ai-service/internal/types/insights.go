@@ -36,6 +36,8 @@ type InsightHighlight struct {
 	EliteValue            float64   `json:"eliteValue"`
 	Difference            float64   `json:"difference"`
 	Unit                  string    `json:"unit,omitempty"`
+	PlayerRawCount        float64   `json:"playerRawCount,omitempty"`
+	EliteRawCount         float64   `json:"eliteRawCount,omitempty"`
 	PlayerTimingSeconds   float64   `json:"playerTimingSeconds,omitempty"`
 	EliteTimingSeconds    float64   `json:"eliteTimingSeconds,omitempty"`
 	TimingDeltaSeconds    float64   `json:"timingDeltaSeconds,omitempty"`

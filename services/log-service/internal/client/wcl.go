@@ -218,7 +218,7 @@ func (c *WCLHTTPClient) GetRankingCandidates(fight types.FightSelection, charact
 		limit = 10
 	}
 
-	rankings, err := c.getEncounterRankings(selectedFight.EncounterID, selectedFight.Difficulty, characterClass, characterSpec)
+	rankings, err := c.getEncounterRankings(selectedFight.EncounterID, selectedFight.Difficulty, characterClass, characterSpec, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -652,7 +652,7 @@ func (c *WCLHTTPClient) normalizeDifficulty(difficulty int) string {
 }
 
 func (c *WCLHTTPClient) fetchTopRankedCohortData(selectedFight types.NormalizedFight, selectedActor WCLActor) ([]types.PlayerFightData, error) {
-	rankings, err := c.getEncounterRankings(selectedFight.EncounterID, selectedFight.Difficulty, selectedActor.Type, selectedActor.SubType)
+	rankings, err := c.getEncounterRankings(selectedFight.EncounterID, selectedFight.Difficulty, selectedActor.Type, selectedActor.SubType, 10)
 	if err != nil {
 		return nil, err
 	}
@@ -706,20 +706,23 @@ func (c *WCLHTTPClient) fetchTopRankedCohortData(selectedFight types.NormalizedF
 	return ordered, nil
 }
 
-func (c *WCLHTTPClient) getEncounterRankings(encounterID int, difficultyName, className, specName string) ([]WCLRankingEntry, error) {
+func (c *WCLHTTPClient) getEncounterRankings(encounterID int, difficultyName, className, specName string, limit int) ([]WCLRankingEntry, error) {
 	const maxRankingPage = 20
+	if limit <= 0 {
+		limit = 10
+	}
 
 	filteredClass := rankingClassFilterValue(className)
 	filteredSpec := rankingSpecFilterValue(specName)
 
-	return c.collectEncounterRankings(encounterID, difficultyName, className, filteredClass, filteredSpec, maxRankingPage)
+	return c.collectEncounterRankings(encounterID, difficultyName, className, filteredClass, filteredSpec, maxRankingPage, limit)
 }
 
-func (c *WCLHTTPClient) collectEncounterRankings(encounterID int, difficultyName, className, classFilter, specFilter string, maxRankingPage int) ([]WCLRankingEntry, error) {
+func (c *WCLHTTPClient) collectEncounterRankings(encounterID int, difficultyName, className, classFilter, specFilter string, maxRankingPage int, limit int) ([]WCLRankingEntry, error) {
 	page := 1
-	results := make([]WCLRankingEntry, 0, 10)
+	results := make([]WCLRankingEntry, 0, limit)
 
-	for len(results) < 10 && page <= maxRankingPage {
+	for len(results) < limit && page <= maxRankingPage {
 		rankingPage, err := c.fetchEncounterRankingsPage(encounterID, difficultyName, classFilter, specFilter, page)
 		if err != nil {
 			return nil, err
@@ -733,7 +736,7 @@ func (c *WCLHTTPClient) collectEncounterRankings(encounterID int, difficultyName
 				continue
 			}
 			results = append(results, ranking)
-			if len(results) == 10 {
+			if len(results) == limit {
 				break
 			}
 		}

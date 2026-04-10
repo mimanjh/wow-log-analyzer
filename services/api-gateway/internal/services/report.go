@@ -274,6 +274,8 @@ type insightHighlight struct {
 	EliteValue            float64   `json:"eliteValue"`
 	Difference            float64   `json:"difference"`
 	Unit                  string    `json:"unit,omitempty"`
+	PlayerRawCount        float64   `json:"playerRawCount,omitempty"`
+	EliteRawCount         float64   `json:"eliteRawCount,omitempty"`
 	PlayerTimingSeconds   float64   `json:"playerTimingSeconds,omitempty"`
 	EliteTimingSeconds    float64   `json:"eliteTimingSeconds,omitempty"`
 	TimingDeltaSeconds    float64   `json:"timingDeltaSeconds,omitempty"`
@@ -872,21 +874,36 @@ func buildAbilityHighlights(values []AbilityUsageComparison, limit int, characte
 		return nil
 	}
 
+	prioritySet := specPriorityFor(characterClass, characterSpec)
 	orderedValues, categories := orderAbilityHighlights(values, characterClass, characterSpec)
+	filteredValues := filterAbilityHighlightsForAI(orderedValues, prioritySet)
+	if len(filteredValues) == 0 {
+		filteredValues = orderedValues
+	}
+
 	highlights := make([]insightHighlight, 0, limit)
-	for _, value := range orderedValues {
+	for _, value := range filteredValues {
+		playerUseTimes := abilityUseTimesSeconds(playerData, value.AbilityID, 3)
+		eliteUseTimes := eliteMedianUseTimesSeconds(eliteData, value.AbilityID, 3)
+		if isHighFrequencyAbility(value) {
+			playerUseTimes = nil
+			eliteUseTimes = nil
+		}
+
 		highlights = append(highlights, insightHighlight{
 			Name:                  value.AbilityName,
-			PlayerValue:           float64(value.PlayerCount),
-			EliteValue:            value.CohortMedianCount,
-			Difference:            value.CountDelta,
-			Unit:                  "casts",
+			PlayerValue:           value.PlayerCastsPerMinute,
+			EliteValue:            value.CohortMedianPerMinute,
+			Difference:            value.PerMinuteDelta,
+			Unit:                  "/min",
+			PlayerRawCount:        float64(value.PlayerCount),
+			EliteRawCount:         value.CohortMedianCount,
 			PlayerTimingSeconds:   value.PlayerFirstUseSeconds,
 			EliteTimingSeconds:    value.CohortMedianFirstUseSec,
 			TimingDeltaSeconds:    value.FirstUseDeltaSeconds,
 			TimingLabel:           "first use",
-			PlayerUseTimesSeconds: abilityUseTimesSeconds(playerData, value.AbilityID, 3),
-			EliteUseTimesSeconds:  eliteMedianUseTimesSeconds(eliteData, value.AbilityID, 3),
+			PlayerUseTimesSeconds: playerUseTimes,
+			EliteUseTimesSeconds:  eliteUseTimes,
 			Category:              categories[normalizeTrackedCooldownName(value.AbilityName)],
 		})
 		if len(highlights) == limit {
@@ -902,9 +919,15 @@ func buildBuffHighlights(values []BuffUptimeComparison, limit int, characterClas
 		return nil
 	}
 
+	prioritySet := specPriorityFor(characterClass, characterSpec)
 	orderedValues, categories := orderBuffHighlights(values, characterClass, characterSpec)
+	filteredValues := filterBuffHighlightsForAI(orderedValues, prioritySet)
+	if len(filteredValues) == 0 {
+		filteredValues = orderedValues
+	}
+
 	highlights := make([]insightHighlight, 0, limit)
-	for _, value := range orderedValues {
+	for _, value := range filteredValues {
 		highlights = append(highlights, insightHighlight{
 			Name:                value.AbilityName,
 			PlayerValue:         value.PlayerUptimePct,
@@ -1078,6 +1101,55 @@ func medianFloat64(values []float64) float64 {
 		return ordered[middle]
 	}
 	return (ordered[middle-1] + ordered[middle]) / 2
+}
+
+func filterAbilityHighlightsForAI(values []AbilityUsageComparison, prioritySet specPrioritySet) []AbilityUsageComparison {
+	if len(values) == 0 {
+		return nil
+	}
+
+	tracked := make(map[string]struct{}, len(prioritySet.Offensives)+len(prioritySet.Defensives)+1)
+	for _, value := range prioritySet.Offensives {
+		tracked[normalizeTrackedCooldownName(value)] = struct{}{}
+	}
+	for _, value := range prioritySet.Defensives {
+		tracked[normalizeTrackedCooldownName(value)] = struct{}{}
+	}
+	tracked["melee"] = struct{}{}
+
+	filtered := make([]AbilityUsageComparison, 0, len(values))
+	for _, value := range values {
+		if _, ok := tracked[normalizeTrackedCooldownName(value.AbilityName)]; ok {
+			filtered = append(filtered, value)
+		}
+	}
+	return filtered
+}
+
+func filterBuffHighlightsForAI(values []BuffUptimeComparison, prioritySet specPrioritySet) []BuffUptimeComparison {
+	if len(values) == 0 {
+		return nil
+	}
+
+	tracked := make(map[string]struct{}, len(prioritySet.Offensives)+len(prioritySet.Defensives))
+	for _, value := range prioritySet.Offensives {
+		tracked[normalizeTrackedCooldownName(value)] = struct{}{}
+	}
+	for _, value := range prioritySet.Defensives {
+		tracked[normalizeTrackedCooldownName(value)] = struct{}{}
+	}
+
+	filtered := make([]BuffUptimeComparison, 0, len(values))
+	for _, value := range values {
+		if _, ok := tracked[normalizeTrackedCooldownName(value.AbilityName)]; ok {
+			filtered = append(filtered, value)
+		}
+	}
+	return filtered
+}
+
+func isHighFrequencyAbility(value AbilityUsageComparison) bool {
+	return normalizeTrackedCooldownName(value.AbilityName) == "melee" || value.PlayerCount > 300 || value.CohortMedianCount > 300
 }
 
 func orderAbilityHighlights(values []AbilityUsageComparison, characterClass, characterSpec string) ([]AbilityUsageComparison, map[string]string) {

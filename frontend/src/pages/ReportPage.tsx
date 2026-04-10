@@ -1374,7 +1374,11 @@ export function ReportPage() {
                         Ability Usage
                     </h2>
                     <div className="rounded-3xl border border-slate-800 bg-slate-950/80 p-6">
-                        <div className="mb-6 flex flex-col gap-3 md:flex-row">
+                        <div className="mb-6 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                            <p className="text-xs text-slate-400">
+                                * all combat data is normalized by fight length
+                            </p>
+                            <div className="flex flex-col gap-3 md:flex-row">
                             <input
                                 type="text"
                                 value={abilitySearch}
@@ -1397,6 +1401,7 @@ export function ReportPage() {
                                 <option value="behind">Only behind</option>
                                 <option value="ahead">Only ahead</option>
                             </select>
+                            </div>
                         </div>
                         {orderedAbilityUsage.length > 0 ? (
                             <div className="overflow-x-auto">
@@ -1437,32 +1442,37 @@ export function ReportPage() {
                                                     </p>
                                                 </td>
                                                 <td className="py-4 pr-4 text-slate-200">
-                                                    <p>{entry.playerCount}</p>
+                                                    <p
+                                                        title={`Total casts: ${entry.playerCount}`}
+                                                    >
+                                                        {entry.playerCastsPerMinute.toFixed(
+                                                            2,
+                                                        )}
+                                                    </p>
                                                 </td>
                                                 <td className="py-4 pr-4 text-slate-300">
-                                                    <p>
-                                                        {Number.isInteger(
-                                                            entry.cohortMedianCount,
-                                                        )
-                                                            ? entry.cohortMedianCount
-                                                            : entry.cohortMedianCount.toFixed(
-                                                                  1,
-                                                              )}
+                                                    <p
+                                                        title={`Elite median total casts: ${Number.isInteger(entry.cohortMedianCount) ? entry.cohortMedianCount : entry.cohortMedianCount.toFixed(1)}`}
+                                                    >
+                                                        {entry.cohortMedianPerMinute.toFixed(
+                                                            2,
+                                                        )}
                                                     </p>
                                                 </td>
                                                 <td className="py-4 pr-4">
                                                     <p
+                                                        title={`Raw total delta: ${formatSigned(entry.countDelta, "", 1)}`}
                                                         className={
-                                                            entry.countDelta >=
+                                                            entry.perMinuteDelta >=
                                                             0
                                                                 ? "text-emerald-400"
                                                                 : "text-rose-400"
                                                         }
                                                     >
                                                         {formatSigned(
-                                                            entry.countDelta,
+                                                            entry.perMinuteDelta,
                                                             "",
-                                                            1,
+                                                            2,
                                                         )}
                                                     </p>
                                                 </td>
