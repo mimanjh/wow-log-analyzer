@@ -4,9 +4,8 @@ import { useAnalyzeStore } from "../stores/useAnalyzeStore";
 import { useBrowserStore } from "../stores/useBrowserStore";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { Button } from "../components/ui/Button";
-import { getAbilityTimeline, getReportJob } from "../lib/api";
+import { getAbilityTimeline, getReportJob, getResourceTimeline } from "../lib/api";
 import {
-    confidenceColor,
     formatKillTime,
     formatSigned,
     getStageCompletionState,
@@ -21,6 +20,8 @@ import type {
     Character,
     Fight,
     ReportJob,
+    ResourceTimelineResponse,
+    ResourceTimelineSeries,
 } from "../types";
 
 const reportStages = [
@@ -1001,6 +1002,189 @@ function renderProgressView(
     );
 }
 
+function ResourceTimelineRow({
+    series,
+    durationMs,
+    toneClass,
+}: {
+    series: ResourceTimelineSeries;
+    durationMs: number;
+    toneClass: string;
+}) {
+    const maxValue = Math.max(
+        1,
+        ...series.samples.map((sample) => sample.maxValue || sample.value || 0),
+    );
+    const points = series.samples
+        .map((sample) => {
+            const x = Math.min(
+                100,
+                Math.max(0, (sample.timestampMs / durationMs) * 100),
+            );
+            const y = 100 - Math.min(100, Math.max(0, (sample.value / maxValue) * 100));
+            return `${x},${y}`;
+        })
+        .join(" ");
+
+    return (
+        <div className="grid gap-3 lg:grid-cols-[220px_minmax(0,1fr)] lg:items-center">
+            <div>
+                {series.reportUrl ? (
+                    <a
+                        href={series.reportUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-medium text-white transition hover:text-sky-300"
+                    >
+                        {series.label}
+                    </a>
+                ) : (
+                    <p className="font-medium text-white">{series.label}</p>
+                )}
+                {series.subtitle && (
+                    <p className="mt-1 text-sm text-slate-400">
+                        {series.subtitle}
+                    </p>
+                )}
+                <p className="mt-1 text-xs text-slate-500">
+                    {series.samples.length} samples
+                    {series.wasteMarkersMs?.length
+                        ? `, ${series.wasteMarkersMs.length} waste/full markers`
+                        : ""}
+                </p>
+            </div>
+            <div className="relative rounded-2xl border border-slate-800 bg-slate-950/80 px-3 pb-5 pt-3">
+                <div className="relative h-24 overflow-visible rounded-xl bg-slate-900/90">
+                    <svg
+                        viewBox="0 0 100 100"
+                        preserveAspectRatio="none"
+                        className="absolute inset-0 h-full w-full"
+                    >
+                        <polyline
+                            points={points}
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            className={toneClass}
+                            vectorEffect="non-scaling-stroke"
+                        />
+                    </svg>
+                    {(series.wasteMarkersMs ?? []).map((markerMs, index) => {
+                        const left = Math.min(
+                            100,
+                            Math.max(0, (markerMs / durationMs) * 100),
+                        );
+                        return (
+                            <div
+                                key={`${series.label}-waste-${markerMs}-${index}`}
+                                className="absolute inset-y-0 w-0.5 bg-rose-500/80"
+                                style={{ left: `${left}%` }}
+                                title={`Waste/full marker at ${formatTimelineTimestamp(markerMs)}`}
+                            />
+                        );
+                    })}
+                </div>
+                <div className="mt-2 flex justify-between text-xs text-slate-500">
+                    <span>0:00</span>
+                    <span>{formatTimelineTimestamp(durationMs)}</span>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function ResourceTimelineModal({
+    timeline,
+    loading,
+    error,
+    onClose,
+}: {
+    timeline: ResourceTimelineResponse | null;
+    loading: boolean;
+    error: string | null;
+    onClose: () => void;
+}) {
+    if (!loading && !timeline && !error) {
+        return null;
+    }
+
+    const durationMs = timeline?.fightDurationMs ?? 1;
+
+    return (
+        <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 px-4 py-8 backdrop-blur-sm"
+            onClick={onClose}
+        >
+            <div
+                className="max-h-[90vh] w-full max-w-6xl overflow-y-auto rounded-3xl border border-slate-800 bg-slate-900 p-6 shadow-2xl"
+                onClick={(event) => event.stopPropagation()}
+            >
+                <div className="flex items-start justify-between gap-4">
+                    <div>
+                        <p className="text-sm uppercase tracking-[0.2em] text-sky-400">
+                            Resource Timeline
+                        </p>
+                        <h2 className="mt-2 text-2xl font-semibold text-white">
+                            {timeline?.resourceType ?? "Loading timeline"}
+                        </h2>
+                        <p className="mt-2 text-sm text-slate-400">
+                            Compare resource level/change samples against elite
+                            fights. Red markers indicate wasted resource or
+                            full-resource samples.
+                        </p>
+                    </div>
+                    <Button variant="secondary" onClick={onClose}>
+                        Close
+                    </Button>
+                </div>
+
+                {loading && (
+                    <div className="mt-8 rounded-3xl border border-slate-800 bg-slate-950/80 p-6 text-sm text-slate-300">
+                        Loading resource timeline...
+                    </div>
+                )}
+
+                {error && (
+                    <div className="mt-8 rounded-3xl border border-rose-500/30 bg-rose-950/20 p-6 text-sm text-rose-200">
+                        {error}
+                    </div>
+                )}
+
+                {timeline && (
+                    <div className="mt-8 space-y-8">
+                        <div className="space-y-4">
+                            <h3 className="text-lg font-semibold text-white">
+                                You
+                            </h3>
+                            <ResourceTimelineRow
+                                series={timeline.player}
+                                durationMs={durationMs}
+                                toneClass="text-sky-400"
+                            />
+                        </div>
+
+                        <div className="space-y-4">
+                            <h3 className="text-lg font-semibold text-white">
+                                Elite
+                            </h3>
+                            <div className="space-y-4">
+                                {timeline.elite.map((series) => (
+                                    <ResourceTimelineRow
+                                        key={`${series.label}-${series.reportUrl ?? "elite"}`}
+                                        series={series}
+                                        durationMs={durationMs}
+                                        toneClass="text-amber-400"
+                                    />
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
 export function ReportPage() {
     usePageTitle("Report");
     const {
@@ -1031,6 +1215,17 @@ export function ReportPage() {
     >({});
     const [timelineLoading, setTimelineLoading] = useState(false);
     const [timelineError, setTimelineError] = useState<string | null>(null);
+    const [resourceTimelineTypeId, setResourceTimelineTypeId] = useState<
+        number | null
+    >(null);
+    const [resourceTimelineCache, setResourceTimelineCache] = useState<
+        Record<number, ResourceTimelineResponse>
+    >({});
+    const [resourceTimelineLoading, setResourceTimelineLoading] =
+        useState(false);
+    const [resourceTimelineError, setResourceTimelineError] = useState<
+        string | null
+    >(null);
     const reportJobId = reportJob?.jobId;
     const reportJobStatus = reportJob?.status;
 
@@ -1088,6 +1283,10 @@ export function ReportPage() {
         setTimelineCache({});
         setTimelineLoading(false);
         setTimelineError(null);
+        setResourceTimelineTypeId(null);
+        setResourceTimelineCache({});
+        setResourceTimelineLoading(false);
+        setResourceTimelineError(null);
     }, [reportJobId]);
 
     if (!reportJob && !reportResult) {
@@ -1209,6 +1408,10 @@ export function ReportPage() {
             : undefined;
     const selectedTimeline =
         timelineAbilityId !== null ? timelineCache[timelineAbilityId] : null;
+    const selectedResourceTimeline =
+        resourceTimelineTypeId !== null
+            ? resourceTimelineCache[resourceTimelineTypeId]
+            : null;
 
     const openAbilityTimeline = async (abilityId: number) => {
         if (!reportJobId) {
@@ -1238,6 +1441,42 @@ export function ReportPage() {
             );
         } finally {
             setTimelineLoading(false);
+        }
+    };
+
+    const openResourceTimeline = async (resourceTypeId: number) => {
+        if (!reportJobId) {
+            setResourceTimelineError(
+                "Timeline data is not available for this report.",
+            );
+            return;
+        }
+
+        setResourceTimelineTypeId(resourceTypeId);
+        setResourceTimelineError(null);
+
+        if (resourceTimelineCache[resourceTypeId]) {
+            return;
+        }
+
+        setResourceTimelineLoading(true);
+        try {
+            const response = await getResourceTimeline(
+                reportJobId,
+                resourceTypeId,
+            );
+            setResourceTimelineCache((current) => ({
+                ...current,
+                [resourceTypeId]: response,
+            }));
+        } catch (error) {
+            setResourceTimelineError(
+                error instanceof Error
+                    ? error.message
+                    : "Failed to load resource timeline",
+            );
+        } finally {
+            setResourceTimelineLoading(false);
         }
     };
 
@@ -1321,10 +1560,7 @@ export function ReportPage() {
                                     key={insight.metricKey}
                                     className="rounded-3xl border border-slate-800 bg-slate-950/80 p-6"
                                 >
-                                    <p className="text-sm uppercase tracking-[0.2em] text-sky-400">
-                                        {insight.confidence} confidence
-                                    </p>
-                                    <h3 className="mt-3 text-lg font-semibold text-white">
+                                    <h3 className="text-lg font-semibold text-white">
                                         {insight.title}
                                     </h3>
                                     <p className="mt-3 text-sm text-slate-300">
@@ -1449,9 +1685,6 @@ export function ReportPage() {
                                             <th className="pb-3 pr-4 font-medium">
                                                 Difference
                                             </th>
-                                            <th className="pb-3 pr-4 font-medium">
-                                                Confidence
-                                            </th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -1506,13 +1739,8 @@ export function ReportPage() {
                                                     </p>
                                                 </td>
                                                 <td className="py-4 pr-4">
-                                                    <p
-                                                        className={`font-medium ${confidenceColor(entry.confidence)}`}
-                                                    >
-                                                        {entry.confidence}
-                                                    </p>
                                                     {entry.caution && (
-                                                        <p className="mt-1 text-xs text-amber-300">
+                                                        <p className="text-xs text-amber-300">
                                                             {entry.caution}
                                                         </p>
                                                     )}
@@ -1594,9 +1822,6 @@ export function ReportPage() {
                                             <th className="pb-3 pr-4 font-medium">
                                                 Delta
                                             </th>
-                                            <th className="pb-3 pr-4 font-medium">
-                                                Confidence
-                                            </th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -1643,13 +1868,8 @@ export function ReportPage() {
                                                     </p>
                                                 </td>
                                                 <td className="py-4 pr-4">
-                                                    <p
-                                                        className={`font-medium ${confidenceColor(entry.confidence)}`}
-                                                    >
-                                                        {entry.confidence}
-                                                    </p>
                                                     {entry.caution && (
-                                                        <p className="mt-1 text-xs text-amber-300">
+                                                        <p className="text-xs text-amber-300">
                                                             {entry.caution}
                                                         </p>
                                                     )}
@@ -1691,8 +1911,8 @@ export function ReportPage() {
                     <div className="rounded-3xl border border-slate-800 bg-slate-950/80 p-6">
                         <div className="mb-6 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                             <p className="text-xs text-slate-400">
-                                * generation and waste are normalized by fight
-                                length
+                                * spec-relevant resource generation and waste
+                                are normalized by fight length
                             </p>
                             <div className="flex flex-col gap-3 md:flex-row">
                                 <input
@@ -1744,16 +1964,18 @@ export function ReportPage() {
                                             <th className="pb-3 pr-4 font-medium">
                                                 Waste %
                                             </th>
-                                            <th className="pb-3 pr-4 font-medium">
-                                                Confidence
-                                            </th>
                                         </tr>
                                     </thead>
                                     <tbody>
                                         {visibleResourceUsage.map((entry) => (
                                             <tr
                                                 key={entry.resourceTypeId}
-                                                className="border-b border-slate-900 align-top last:border-b-0"
+                                                className="cursor-pointer border-b border-slate-900 align-top transition hover:bg-slate-900/60 last:border-b-0"
+                                                onClick={() => {
+                                                    void openResourceTimeline(
+                                                        entry.resourceTypeId,
+                                                    );
+                                                }}
                                             >
                                                 <td className="py-4 pr-4">
                                                     <p className="font-medium text-white">
@@ -1832,13 +2054,8 @@ export function ReportPage() {
                                                     </p>
                                                 </td>
                                                 <td className="py-4 pr-4">
-                                                    <p
-                                                        className={`font-medium ${confidenceColor(entry.confidence)}`}
-                                                    >
-                                                        {entry.confidence}
-                                                    </p>
                                                     {entry.caution && (
-                                                        <p className="mt-1 text-xs text-amber-300">
+                                                        <p className="text-xs text-amber-300">
                                                             {entry.caution}
                                                         </p>
                                                     )}
@@ -1893,6 +2110,16 @@ export function ReportPage() {
                     setTimelineAbilityId(null);
                     setTimelineError(null);
                     setTimelineLoading(false);
+                }}
+            />
+            <ResourceTimelineModal
+                timeline={selectedResourceTimeline}
+                loading={resourceTimelineLoading}
+                error={resourceTimelineError}
+                onClose={() => {
+                    setResourceTimelineTypeId(null);
+                    setResourceTimelineError(null);
+                    setResourceTimelineLoading(false);
                 }}
             />
         </>

@@ -156,11 +156,34 @@ export interface AbilityTimelineResponse {
   elite: AbilityTimelineSeries[]
 }
 
+export interface ResourceTimelineResponse {
+  resourceTypeId: number
+  resourceType: string
+  fightDurationMs: number
+  player: ResourceTimelineSeries
+  elite: ResourceTimelineSeries[]
+}
+
 export interface AbilityTimelineSeries {
   label: string
   subtitle?: string
   reportUrl?: string
   castsMs: number[]
+}
+
+export interface ResourceTimelineSeries {
+  label: string
+  subtitle?: string
+  reportUrl?: string
+  samples: ResourceTimelineSample[]
+  wasteMarkersMs?: number[]
+}
+
+export interface ResourceTimelineSample {
+  timestampMs: number
+  value: number
+  maxValue?: number
+  waste?: number
 }
 
 export interface ReportJobProgress {
@@ -181,7 +204,6 @@ export interface AIInsight {
   metricKey: string
   title: string
   summary: string
-  confidence: string
   caution?: string
 }
 
@@ -237,7 +259,6 @@ export interface MetricDelta {
   playerValue: number
   cohortValue: number
   difference: number
-  confidence: string
   caution?: string
 }
 
@@ -253,14 +274,12 @@ export interface CastsPerMinuteMetric {
   value: number
   totalCasts: number
   fightDuration: number
-  confidence: string
   caution?: string
 }
 
 export interface MajorCDCountMetric {
   value: number
   totalCooldowns: number
-  confidence: string
   caution?: string
 }
 
@@ -268,7 +287,6 @@ export interface MajorCDDriftMetric {
   value: number
   totalDrift: number
   cooldownCount: number
-  confidence: string
   caution?: string
 }
 
@@ -276,7 +294,6 @@ export interface BuffUptimeMetric {
   value: number
   totalUptime: number
   fightDuration: number
-  confidence: string
   caution?: string
 }
 
@@ -284,7 +301,6 @@ export interface DowntimePercentageMetric {
   value: number
   totalDowntime: number
   fightDuration: number
-  confidence: string
   caution?: string
 }
 
@@ -301,7 +317,6 @@ export interface AbilityUsageComparison {
   perMinuteDelta: number
   firstUseDeltaSeconds?: number
   sampleSize: number
-  confidence: string
   caution?: string
 }
 
@@ -315,7 +330,6 @@ export interface BuffUptimeComparison {
   uptimeDelta: number
   firstApplyDeltaSeconds?: number
   sampleSize: number
-  confidence: string
   caution?: string
 }
 
@@ -332,6 +346,5 @@ export interface ResourceUsageComparison {
   cohortMedianWastePct: number
   wastePctDelta: number
   sampleSize: number
-  confidence: string
   caution?: string
 }

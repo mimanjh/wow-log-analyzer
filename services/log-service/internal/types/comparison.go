@@ -112,6 +112,7 @@ type ResourceEvent struct {
 	TargetID       int       `json:"targetId"`
 	ResourceTypeID int       `json:"resourceTypeId"`
 	ResourceType   string    `json:"resourceType"`
+	Amount         float64   `json:"amount,omitempty"`
 	Change         float64   `json:"change"`
 	Waste          float64   `json:"waste"`
 	MaxAmount      float64   `json:"maxAmount,omitempty"`

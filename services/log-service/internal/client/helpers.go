@@ -158,6 +158,10 @@ func normalizeResourceEvents(reportStartTime int64, raw []map[string]interface{}
 		if change == 0 {
 			change = parseFloat(event["amount"])
 		}
+		amount := parseFloat(event["resourceAmount"])
+		if amount == 0 {
+			amount = parseFloat(event["current"])
+		}
 		waste := parseFloat(event["waste"])
 		maxAmount := parseFloat(event["maxResourceAmount"])
 		if maxAmount == 0 {
@@ -170,6 +174,7 @@ func normalizeResourceEvents(reportStartTime int64, raw []map[string]interface{}
 			TargetID:       targetID,
 			ResourceTypeID: resourceTypeID,
 			ResourceType:   resourceTypeName(resourceTypeID),
+			Amount:         amount,
 			Change:         change,
 			Waste:          waste,
 			MaxAmount:      maxAmount,

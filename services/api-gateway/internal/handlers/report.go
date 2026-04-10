@@ -104,3 +104,36 @@ func (h *ReportHandler) GetAbilityTimeline(w http.ResponseWriter, r *http.Reques
 		log.Printf("Failed to encode ability timeline response: %v", err)
 	}
 }
+
+func (h *ReportHandler) GetResourceTimeline(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	jobID := strings.TrimPrefix(r.URL.Path, "/api/report/jobs/")
+	jobID = strings.TrimSuffix(jobID, "/resource-timeline")
+	jobID = strings.TrimSpace(jobID)
+	if jobID == "" {
+		http.Error(w, "jobId is required", http.StatusBadRequest)
+		return
+	}
+
+	resourceTypeID, err := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("resourceTypeId")))
+	if err != nil {
+		http.Error(w, "resourceTypeId is required", http.StatusBadRequest)
+		return
+	}
+
+	response, err := h.reportService.GetResourceTimeline(jobID, resourceTypeID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Failed to encode resource timeline response: %v", err)
+	}
+}

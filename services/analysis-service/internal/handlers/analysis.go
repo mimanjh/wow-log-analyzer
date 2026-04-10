@@ -50,8 +50,10 @@ func (h *AnalysisHandler) CompareFight(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		PlayerData types.PlayerFightData   `json:"playerData"`
-		CohortData []types.PlayerFightData `json:"cohortData"`
+		PlayerData     types.PlayerFightData   `json:"playerData"`
+		CohortData     []types.PlayerFightData `json:"cohortData"`
+		CharacterClass string                  `json:"characterClass"`
+		CharacterSpec  string                  `json:"characterSpec"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -90,7 +92,7 @@ func (h *AnalysisHandler) CompareFight(w http.ResponseWriter, r *http.Request) {
 
 	comparison.AbilityUsage = h.analysisService.CalculateAbilityUsageComparisons(req.PlayerData, req.CohortData)
 	comparison.BuffUptimes = h.analysisService.CalculateBuffUptimeComparisons(req.PlayerData, req.CohortData)
-	comparison.ResourceUsage = h.analysisService.CalculateResourceUsageComparisons(req.PlayerData, req.CohortData)
+	comparison.ResourceUsage = h.analysisService.CalculateResourceUsageComparisons(req.PlayerData, req.CohortData, req.CharacterClass, req.CharacterSpec)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(comparison)

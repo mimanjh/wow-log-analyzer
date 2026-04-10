@@ -6,6 +6,7 @@ import type {
   CharacterReportsPage,
   Fight,
   ReportJob,
+  ResourceTimelineResponse,
 } from '../types'
 
 export interface AnalyzeResponse {
@@ -86,6 +87,26 @@ export async function getAbilityTimeline(
   if (!response.ok) {
     const errorText = await response.text()
     throw new Error(errorText || 'Failed to load ability timeline')
+  }
+
+  return response.json()
+}
+
+export async function getResourceTimeline(
+  jobId: string,
+  resourceTypeId: number,
+): Promise<ResourceTimelineResponse> {
+  const params = new URLSearchParams({
+    resourceTypeId: String(resourceTypeId),
+  })
+
+  const response = await fetch(
+    `/api/report/jobs/${encodeURIComponent(jobId)}/resource-timeline?${params.toString()}`,
+  )
+
+  if (!response.ok) {
+    const errorText = await response.text()
+    throw new Error(errorText || 'Failed to load resource timeline')
   }
 
   return response.json()

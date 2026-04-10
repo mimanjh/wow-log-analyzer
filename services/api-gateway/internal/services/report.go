@@ -37,11 +37,34 @@ type AbilityTimelineResponse struct {
 	Elite           []AbilityTimelineSeries `json:"elite"`
 }
 
+type ResourceTimelineResponse struct {
+	ResourceTypeID  int                      `json:"resourceTypeId"`
+	ResourceType    string                   `json:"resourceType"`
+	FightDurationMS int64                    `json:"fightDurationMs"`
+	Player          ResourceTimelineSeries   `json:"player"`
+	Elite           []ResourceTimelineSeries `json:"elite"`
+}
+
 type AbilityTimelineSeries struct {
 	Label     string  `json:"label"`
 	Subtitle  string  `json:"subtitle,omitempty"`
 	ReportURL string  `json:"reportUrl,omitempty"`
 	CastsMS   []int64 `json:"castsMs"`
+}
+
+type ResourceTimelineSeries struct {
+	Label        string                   `json:"label"`
+	Subtitle     string                   `json:"subtitle,omitempty"`
+	ReportURL    string                   `json:"reportUrl,omitempty"`
+	Samples      []ResourceTimelineSample `json:"samples"`
+	WasteMarkers []int64                  `json:"wasteMarkersMs,omitempty"`
+}
+
+type ResourceTimelineSample struct {
+	TimestampMS int64   `json:"timestampMs"`
+	Value       float64 `json:"value"`
+	MaxValue    float64 `json:"maxValue,omitempty"`
+	Waste       float64 `json:"waste,omitempty"`
 }
 
 type CohortEntry struct {
@@ -93,14 +116,12 @@ type CastsPerMinuteMetric struct {
 	Value         float64 `json:"value"`
 	TotalCasts    int     `json:"totalCasts"`
 	FightDuration float64 `json:"fightDuration"`
-	Confidence    string  `json:"confidence"`
 	Caution       string  `json:"caution,omitempty"`
 }
 
 type MajorCDCountMetric struct {
 	Value          int    `json:"value"`
 	TotalCooldowns int    `json:"totalCooldowns"`
-	Confidence     string `json:"confidence"`
 	Caution        string `json:"caution,omitempty"`
 }
 
@@ -108,7 +129,6 @@ type MajorCDDriftMetric struct {
 	Value         float64 `json:"value"`
 	TotalDrift    float64 `json:"totalDrift"`
 	CooldownCount int     `json:"cooldownCount"`
-	Confidence    string  `json:"confidence"`
 	Caution       string  `json:"caution,omitempty"`
 }
 
@@ -116,7 +136,6 @@ type BuffUptimeMetric struct {
 	Value         float64 `json:"value"`
 	TotalUptime   float64 `json:"totalUptime"`
 	FightDuration float64 `json:"fightDuration"`
-	Confidence    string  `json:"confidence"`
 	Caution       string  `json:"caution,omitempty"`
 }
 
@@ -124,7 +143,6 @@ type DowntimePercentageMetric struct {
 	Value         float64 `json:"value"`
 	TotalDowntime float64 `json:"totalDowntime"`
 	FightDuration float64 `json:"fightDuration"`
-	Confidence    string  `json:"confidence"`
 	Caution       string  `json:"caution,omitempty"`
 }
 
@@ -161,7 +179,6 @@ type MetricDelta struct {
 	CohortValue float64 `json:"cohortValue"`
 	Difference  float64 `json:"difference"`
 	Percentile  float64 `json:"percentile"`
-	Confidence  string  `json:"confidence"`
 	Caution     string  `json:"caution,omitempty"`
 }
 
@@ -187,7 +204,6 @@ type AbilityUsageComparison struct {
 	FirstUseDeltaSeconds    float64 `json:"firstUseDeltaSeconds,omitempty"`
 	Percentile              float64 `json:"percentile"`
 	SampleSize              int     `json:"sampleSize"`
-	Confidence              string  `json:"confidence"`
 	Caution                 string  `json:"caution,omitempty"`
 }
 
@@ -202,7 +218,6 @@ type BuffUptimeComparison struct {
 	FirstApplyDeltaSeconds  float64 `json:"firstApplyDeltaSeconds,omitempty"`
 	Percentile              float64 `json:"percentile"`
 	SampleSize              int     `json:"sampleSize"`
-	Confidence              string  `json:"confidence"`
 	Caution                 string  `json:"caution,omitempty"`
 }
 
@@ -219,7 +234,6 @@ type ResourceUsageComparison struct {
 	CohortMedianWastePct           float64 `json:"cohortMedianWastePct"`
 	WastePctDelta                  float64 `json:"wastePctDelta"`
 	SampleSize                     int     `json:"sampleSize"`
-	Confidence                     string  `json:"confidence"`
 	Caution                        string  `json:"caution,omitempty"`
 }
 
@@ -252,8 +266,10 @@ type RankingCandidate struct {
 }
 
 type analysisCompareRequest struct {
-	PlayerData json.RawMessage   `json:"playerData"`
-	CohortData []json.RawMessage `json:"cohortData"`
+	PlayerData     json.RawMessage   `json:"playerData"`
+	CohortData     []json.RawMessage `json:"cohortData"`
+	CharacterClass string            `json:"characterClass,omitempty"`
+	CharacterSpec  string            `json:"characterSpec,omitempty"`
 }
 
 type insightGenerationRequest struct {
@@ -306,11 +322,10 @@ type insightHighlight struct {
 }
 
 type AIInsight struct {
-	MetricKey  string `json:"metricKey"`
-	Title      string `json:"title"`
-	Summary    string `json:"summary"`
-	Confidence string `json:"confidence"`
-	Caution    string `json:"caution,omitempty"`
+	MetricKey string `json:"metricKey"`
+	Title     string `json:"title"`
+	Summary   string `json:"summary"`
+	Caution   string `json:"caution,omitempty"`
 }
 
 type FocusRecommendation struct {
@@ -361,13 +376,14 @@ type reportTimelineData struct {
 }
 
 type timelineFightData struct {
-	PlayerID     int                    `json:"playerId"`
-	FightID      int                    `json:"fightId"`
-	FightStart   time.Time              `json:"fightStart"`
-	FightEnd     time.Time              `json:"fightEnd"`
-	CastEvents   []timelineAbilityEvent `json:"castEvents"`
-	DamageEvents []timelineAbilityEvent `json:"damageEvents"`
-	BuffEvents   []timelineBuffEvent    `json:"buffEvents"`
+	PlayerID       int                     `json:"playerId"`
+	FightID        int                     `json:"fightId"`
+	FightStart     time.Time               `json:"fightStart"`
+	FightEnd       time.Time               `json:"fightEnd"`
+	CastEvents     []timelineAbilityEvent  `json:"castEvents"`
+	DamageEvents   []timelineAbilityEvent  `json:"damageEvents"`
+	BuffEvents     []timelineBuffEvent     `json:"buffEvents"`
+	ResourceEvents []timelineResourceEvent `json:"resourceEvents"`
 }
 
 type timelineAbilityEvent struct {
@@ -384,6 +400,16 @@ type timelineBuffEvent struct {
 	Timestamp time.Time       `json:"timestamp"`
 	Ability   timelineAbility `json:"ability"`
 	EventType string          `json:"eventType"`
+}
+
+type timelineResourceEvent struct {
+	Timestamp      time.Time `json:"timestamp"`
+	ResourceTypeID int       `json:"resourceTypeId"`
+	ResourceType   string    `json:"resourceType"`
+	Amount         float64   `json:"amount"`
+	Change         float64   `json:"change"`
+	Waste          float64   `json:"waste"`
+	MaxAmount      float64   `json:"maxAmount"`
 }
 
 type ReportJobProgress struct {
@@ -531,6 +557,69 @@ func (s *ReportService) GetAbilityTimeline(jobID string, abilityID int) (Ability
 	}, nil
 }
 
+func (s *ReportService) GetResourceTimeline(jobID string, resourceTypeID int) (ResourceTimelineResponse, error) {
+	s.jobMu.RLock()
+	job, ok := s.jobs[jobID]
+	s.jobMu.RUnlock()
+	if !ok {
+		return ResourceTimelineResponse{}, fmt.Errorf("report job %s not found", jobID)
+	}
+	if job.timeline == nil {
+		return ResourceTimelineResponse{}, fmt.Errorf("resource timeline is not available for this job yet")
+	}
+
+	resourceType := findResourceType(job.timeline.PlayerData, resourceTypeID)
+	if resourceType == "" {
+		for _, eliteData := range job.timeline.EliteData {
+			resourceType = findResourceType(eliteData, resourceTypeID)
+			if resourceType != "" {
+				break
+			}
+		}
+	}
+	if resourceType == "" {
+		resourceType = "Selected Resource"
+	}
+
+	playerSeries := buildResourceTimelineSeries(
+		job.timeline.PlayerData,
+		resourceTypeID,
+		job.timeline.Character.Name,
+		fmt.Sprintf("%s %s", job.timeline.Character.Spec, job.timeline.Character.Class),
+		"",
+	)
+	if len(playerSeries.Samples) == 0 {
+		return ResourceTimelineResponse{}, fmt.Errorf("no resource timeline was available for this resource")
+	}
+
+	eliteSeries := make([]ResourceTimelineSeries, 0, len(job.timeline.EliteData))
+	for index, eliteData := range job.timeline.EliteData {
+		entry := job.timeline.EliteEntries[index]
+		subtitle := strings.TrimSpace(fmt.Sprintf("%s %s", entry.Spec, entry.Class))
+		if entry.Server != "" {
+			subtitle = strings.TrimSpace(fmt.Sprintf("%s - %s", subtitle, entry.Server))
+		}
+		series := buildResourceTimelineSeries(
+			eliteData,
+			resourceTypeID,
+			entry.Name,
+			subtitle,
+			entry.ReportURL,
+		)
+		if len(series.Samples) > 0 {
+			eliteSeries = append(eliteSeries, series)
+		}
+	}
+
+	return ResourceTimelineResponse{
+		ResourceTypeID:  resourceTypeID,
+		ResourceType:    resourceType,
+		FightDurationMS: job.timeline.PlayerData.FightEnd.Sub(job.timeline.PlayerData.FightStart).Milliseconds(),
+		Player:          playerSeries,
+		Elite:           eliteSeries,
+	}, nil
+}
+
 func (s *ReportService) runJob(jobID string, req GenerateReportRequest) {
 	ctx := context.Background()
 
@@ -590,7 +679,7 @@ func (s *ReportService) runJob(jobID string, req GenerateReportRequest) {
 	})
 
 	s.updateJob(jobID, ReportJobRunning, "analyzing", "Running deterministic comparison analysis.", ReportJobProgress{Current: 4, Total: 5}, "", nil)
-	comparison, err := s.fetchComparison(ctx, playerData, cohortData)
+	comparison, err := s.fetchComparison(ctx, req, playerData, cohortData)
 	if err != nil {
 		s.updateJob(jobID, ReportJobFailed, "analyzing", "Failed to compute deterministic comparison metrics.", ReportJobProgress{Current: 4, Total: 5}, err.Error(), nil)
 		return
@@ -736,15 +825,17 @@ func (s *ReportService) fetchCohortMember(ctx context.Context, candidate Ranking
 	)
 }
 
-func (s *ReportService) fetchComparison(ctx context.Context, playerData json.RawMessage, cohortData []json.RawMessage) (ComparisonResult, error) {
+func (s *ReportService) fetchComparison(ctx context.Context, req GenerateReportRequest, playerData json.RawMessage, cohortData []json.RawMessage) (ComparisonResult, error) {
 	var comparison ComparisonResult
 	err := s.postForJSON(
 		ctx,
 		s.analysisClient,
 		s.analysisURL+"/analyze/compare",
 		analysisCompareRequest{
-			PlayerData: playerData,
-			CohortData: cohortData,
+			PlayerData:     playerData,
+			CohortData:     cohortData,
+			CharacterClass: req.Character.Class,
+			CharacterSpec:  req.Character.Spec,
 		},
 		&comparison,
 		"analysis-service",
@@ -863,6 +954,60 @@ func findAbilityName(data timelineFightData, abilityID int) string {
 	for _, event := range data.DamageEvents {
 		if event.Ability.ID == abilityID {
 			return event.Ability.Name
+		}
+	}
+	return ""
+}
+
+func buildResourceTimelineSeries(data timelineFightData, resourceTypeID int, label, subtitle, reportURL string) ResourceTimelineSeries {
+	samples := make([]ResourceTimelineSample, 0)
+	wasteMarkers := make([]int64, 0)
+
+	for _, event := range data.ResourceEvents {
+		if event.ResourceTypeID != resourceTypeID {
+			continue
+		}
+
+		timestampMS := event.Timestamp.Sub(data.FightStart).Milliseconds()
+		if timestampMS < 0 {
+			timestampMS = 0
+		}
+		sample := ResourceTimelineSample{
+			TimestampMS: timestampMS,
+			Value:       event.Amount,
+			MaxValue:    event.MaxAmount,
+			Waste:       event.Waste,
+		}
+		if sample.Value == 0 && event.Change > 0 {
+			sample.Value = event.Change
+		}
+		samples = append(samples, sample)
+
+		if event.Waste > 0 || (event.MaxAmount > 0 && event.Amount >= event.MaxAmount) {
+			wasteMarkers = append(wasteMarkers, timestampMS)
+		}
+	}
+
+	sort.Slice(samples, func(i, j int) bool {
+		return samples[i].TimestampMS < samples[j].TimestampMS
+	})
+	sort.Slice(wasteMarkers, func(i, j int) bool {
+		return wasteMarkers[i] < wasteMarkers[j]
+	})
+
+	return ResourceTimelineSeries{
+		Label:        label,
+		Subtitle:     subtitle,
+		ReportURL:    reportURL,
+		Samples:      samples,
+		WasteMarkers: wasteMarkers,
+	}
+}
+
+func findResourceType(data timelineFightData, resourceTypeID int) string {
+	for _, event := range data.ResourceEvents {
+		if event.ResourceTypeID == resourceTypeID && event.ResourceType != "" {
+			return event.ResourceType
 		}
 	}
 	return ""
