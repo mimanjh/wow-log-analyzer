@@ -54,12 +54,15 @@ type RankingCandidate struct {
 }
 
 type CharacterOption struct {
-	ID         int    `json:"id"`
-	Name       string `json:"name"`
-	Class      string `json:"class"`
-	Spec       string `json:"spec"`
-	Role       string `json:"role"`
-	ServerName string `json:"serverName,omitempty"`
+	ID                  int    `json:"id"`
+	Name                string `json:"name"`
+	Class               string `json:"class"`
+	Spec                string `json:"spec"`
+	Role                string `json:"role"`
+	ServerName          string `json:"serverName,omitempty"`
+	TalentImportCode    string `json:"talentImportCode,omitempty"`
+	TalentCalculatorURL string `json:"talentCalculatorUrl,omitempty"`
+	TalentLookupIDs     []int  `json:"-"`
 }
 
 type Ability struct {

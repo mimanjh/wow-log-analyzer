@@ -970,11 +970,80 @@ func (c *WCLHTTPClient) getFightCharacters(reportID string, fightID int) ([]type
 		return nil, fmt.Errorf("failed to parse fight player details: %w", err)
 	}
 
+	c.addTalentBuilds(reportID, fightID, characters)
+
 	sort.Slice(characters, func(i, j int) bool {
 		return characters[i].Name < characters[j].Name
 	})
 
 	return characters, nil
+}
+
+func (c *WCLHTTPClient) addTalentBuilds(reportID string, fightID int, characters []types.CharacterOption) {
+	if len(characters) == 0 {
+		return
+	}
+
+	fields := make([]string, 0, len(characters))
+	aliases := make(map[string]int, len(characters))
+	for index, character := range characters {
+		lookupIDs := character.TalentLookupIDs
+		if len(lookupIDs) == 0 {
+			lookupIDs = []int{character.ID}
+		}
+		for candidateIndex, actorID := range lookupIDs {
+			if actorID == 0 {
+				continue
+			}
+			alias := fmt.Sprintf("talent%d_%d", index, candidateIndex)
+			aliases[alias] = index
+			fields = append(fields, fmt.Sprintf("%s: talentImportCode(actorID: %d)", alias, actorID))
+		}
+	}
+	if len(fields) == 0 {
+		return
+	}
+
+	query := fmt.Sprintf(`
+		query {
+			reportData {
+				report(code: "%s") {
+					fights(fightIDs: [%d]) {
+						%s
+					}
+				}
+			}
+		}`, reportID, fightID, strings.Join(fields, "\n\t\t\t\t\t\t"))
+
+	var response struct {
+		Data struct {
+			ReportData struct {
+				Report struct {
+					Fights []map[string]*string `json:"fights"`
+				} `json:"report"`
+			} `json:"reportData"`
+		} `json:"data"`
+	}
+
+	if err := c.makeGraphQLRequest(query, &response); err != nil {
+		return
+	}
+	if len(response.Data.ReportData.Report.Fights) == 0 {
+		return
+	}
+
+	for alias, code := range response.Data.ReportData.Report.Fights[0] {
+		index, ok := aliases[alias]
+		if !ok || code == nil || strings.TrimSpace(*code) == "" {
+			continue
+		}
+		if characters[index].TalentImportCode != "" {
+			continue
+		}
+		trimmedCode := strings.TrimSpace(*code)
+		characters[index].TalentImportCode = trimmedCode
+		characters[index].TalentCalculatorURL = "https://www.wowhead.com/talent-calc/blizzard/" + url.PathEscape(trimmedCode)
+	}
 }
 
 func (c *WCLHTTPClient) fetchPlayerFightData(reportID string, fight types.NormalizedFight, actorID int) (types.PlayerFightData, error) {

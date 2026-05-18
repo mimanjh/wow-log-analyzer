@@ -1,10 +1,14 @@
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAnalyzeStore } from "../stores/useAnalyzeStore";
 import { useBrowserStore } from "../stores/useBrowserStore";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { Button } from "../components/ui/Button";
-import { getAbilityTimeline, getReportJob, getResourceTimeline } from "../lib/api";
+import {
+    getAbilityTimeline,
+    getReportJob,
+    getResourceTimeline,
+} from "../lib/api";
 import {
     formatKillTime,
     formatSigned,
@@ -627,7 +631,12 @@ const trackedSpecPriorities: Record<
 
 function renderSummaryCard(
     title: string,
-    content: Array<{ label: string; value: string }>,
+    content: Array<{
+        label: string;
+        value: ReactNode;
+        href?: string;
+        fullWidth?: boolean;
+    }>,
     href?: string,
 ) {
     const card = (
@@ -635,11 +644,25 @@ function renderSummaryCard(
             className={`rounded-3xl border border-slate-800 bg-slate-950/80 p-6 transition hover:border-sky-500/60 ${href ? "cursor-pointer" : ""}`}
         >
             <h2 className="text-lg font-semibold text-white">{title}</h2>
-            <div className="mt-4 space-y-3">
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
                 {content.map((item) => (
-                    <div key={item.label}>
+                    <div
+                        key={item.label}
+                        className={item.fullWidth ? "sm:col-span-2" : ""}
+                    >
                         <p className="text-sm text-slate-400">{item.label}</p>
-                        <p className="text-white">{item.value}</p>
+                        {item.href ? (
+                            <a
+                                href={item.href}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-sky-300 underline-offset-4 hover:text-sky-200 hover:underline"
+                            >
+                                {item.value}
+                            </a>
+                        ) : (
+                            <p className="text-white">{item.value}</p>
+                        )}
                     </div>
                 ))}
             </div>
@@ -694,6 +717,77 @@ function formatTimelineTimestamp(durationMs: number) {
     const minutes = Math.floor(totalSeconds / 60);
     const seconds = totalSeconds % 60;
     return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
+function formatSeconds(value: number) {
+    const rounded = Math.max(0, Math.round(value));
+    const minutes = Math.floor(rounded / 60);
+    const seconds = rounded % 60;
+    if (minutes === 0) {
+        return `${seconds}s`;
+    }
+    return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
+function formatSignedSeconds(value: number) {
+    const sign = value > 0 ? "+" : value < 0 ? "-" : "";
+    return `${sign}${formatSeconds(Math.abs(value))}`;
+}
+
+function resourceMaxValue(resourceTypeId: number, resourceType: string) {
+    switch (resourceTypeId) {
+        case 1:
+        case 2:
+        case 3:
+        case 6:
+        case 8:
+        case 13:
+        case 18:
+            return 100;
+        case 4:
+        case 7:
+        case 9:
+            return 5;
+        case 5:
+        case 12:
+        case 19:
+            return 6;
+        case 11:
+            return 10;
+        case 16:
+            return 4;
+        case 17:
+            return 120;
+        default:
+            break;
+    }
+
+    switch (resourceType.trim().toLowerCase()) {
+        case "rage":
+        case "focus":
+        case "energy":
+        case "runic power":
+        case "lunar power":
+        case "insanity":
+        case "pain":
+            return 100;
+        case "fury":
+            return 120;
+        case "combo points":
+        case "soul shards":
+        case "holy power":
+            return 5;
+        case "runes":
+        case "chi":
+        case "essence":
+            return 6;
+        case "maelstrom":
+            return 10;
+        case "arcane charges":
+            return 4;
+        default:
+            return 1;
+    }
 }
 
 function TimelineRow({
@@ -946,13 +1040,21 @@ function renderProgressView(
                 {renderSummaryCard("Character Summary", [
                     { label: "Name", value: character.name },
                     {
+                        label: "Server",
+                        value: character.serverName || "Unknown server",
+                    },
+                    {
                         label: "Class & Spec",
-                        value: `${character.class} ${character.spec}`,
+                        value: `${character.class} - ${character.spec}`,
                     },
                     { label: "Role", value: character.role },
                     {
-                        label: "Server",
-                        value: character.serverName || "Unknown server",
+                        label: "Talent",
+                        value: character.talentCalculatorUrl
+                            ? "Open in Wowhead"
+                            : "Unavailable",
+                        href: character.talentCalculatorUrl,
+                        fullWidth: true,
                     },
                 ])}
             </div>
@@ -1005,24 +1107,27 @@ function renderProgressView(
 function ResourceTimelineRow({
     series,
     durationMs,
+    resourceTypeId,
+    resourceType,
     toneClass,
 }: {
     series: ResourceTimelineSeries;
     durationMs: number;
+    resourceTypeId: number;
+    resourceType: string;
     toneClass: string;
 }) {
     const rowDurationMs = series.durationMs || durationMs;
-    const maxValue = Math.max(
-        1,
-        ...series.samples.map((sample) => sample.maxValue || sample.value || 0),
-    );
+    const maxValue = resourceMaxValue(resourceTypeId, resourceType);
     const points = series.samples
         .map((sample) => {
             const x = Math.min(
                 100,
                 Math.max(0, (sample.timestampMs / rowDurationMs) * 100),
             );
-            const y = 100 - Math.min(100, Math.max(0, (sample.value / maxValue) * 100));
+            const y =
+                100 -
+                Math.min(100, Math.max(0, (sample.value / maxValue) * 100));
             return `${x},${y}`;
         })
         .join(" ");
@@ -1160,6 +1265,8 @@ function ResourceTimelineModal({
                             <ResourceTimelineRow
                                 series={timeline.player}
                                 durationMs={durationMs}
+                                resourceTypeId={timeline.resourceTypeId}
+                                resourceType={timeline.resourceType}
                                 toneClass="text-sky-400"
                             />
                         </div>
@@ -1174,6 +1281,8 @@ function ResourceTimelineModal({
                                         key={`${series.label}-${series.reportUrl ?? "elite"}`}
                                         series={series}
                                         durationMs={durationMs}
+                                        resourceTypeId={timeline.resourceTypeId}
+                                        resourceType={timeline.resourceType}
                                         toneClass="text-amber-400"
                                     />
                                 ))}
@@ -1204,7 +1313,8 @@ export function ReportPage() {
     const [buffSearch, setBuffSearch] = useState("");
     const [buffFilter, setBuffFilter] = useState<ComparisonFilter>("all");
     const [resourceSearch, setResourceSearch] = useState("");
-    const [resourceFilter, setResourceFilter] = useState<ComparisonFilter>("all");
+    const [resourceFilter, setResourceFilter] =
+        useState<ComparisonFilter>("all");
     const [showAllAbilities, setShowAllAbilities] = useState(false);
     const [showAllBuffs, setShowAllBuffs] = useState(false);
     const [showAllResources, setShowAllResources] = useState(false);
@@ -1354,7 +1464,7 @@ export function ReportPage() {
             .includes(resourceSearch.trim().toLowerCase());
         return (
             searchMatches &&
-            matchesFilter(entry.timeAtMaxDeltaSeconds * -1, resourceFilter)
+            matchesFilter(entry.fullWindowDeltaSeconds * -1, resourceFilter)
         );
     });
     const orderedAbilityUsage = sortByTrackedPriority(
@@ -1367,12 +1477,13 @@ export function ReportPage() {
     );
     const orderedResourceUsage = [...filteredResourceUsage].sort(
         (left, right) => {
-            if (
-                left.timeAtMaxDeltaSeconds === right.timeAtMaxDeltaSeconds
-            ) {
-                return left.resourceType.localeCompare(right.resourceType);
+            if (left.fullWindowDeltaSeconds === right.fullWindowDeltaSeconds) {
+                if (left.fullMarkerDelta === right.fullMarkerDelta) {
+                    return left.resourceType.localeCompare(right.resourceType);
+                }
+                return right.fullMarkerDelta - left.fullMarkerDelta;
             }
-            return right.timeAtMaxDeltaSeconds - left.timeAtMaxDeltaSeconds;
+            return right.fullWindowDeltaSeconds - left.fullWindowDeltaSeconds;
         },
     );
     const visibleAbilityUsage = showAllAbilities
@@ -1521,22 +1632,30 @@ export function ReportPage() {
                         fightUrl,
                     )}
 
-                    {renderSummaryCard(
-                        "Character Summary",
-                        [
-                            { label: "Name", value: character.name },
-                            {
-                                label: "Class & Spec",
-                                value: `${character.class} ${character.spec}`,
-                            },
-                            { label: "Role", value: character.role },
-                            {
-                                label: "Server",
-                                value: character.serverName || "Unknown server",
-                            },
-                        ],
-                        characterUrl,
-                    )}
+                    {renderSummaryCard("Character Summary", [
+                        {
+                            label: "Name",
+                            value: character.name,
+                            href: characterUrl,
+                        },
+                        {
+                            label: "Server",
+                            value: character.serverName || "Unknown server",
+                        },
+                        {
+                            label: "Class & Spec",
+                            value: `${character.class} ${character.spec}`,
+                        },
+                        { label: "Role", value: character.role },
+                        {
+                            label: "Talent",
+                            value: character.talentCalculatorUrl
+                                ? "Open in Wowhead"
+                                : "Unavailable",
+                            href: character.talentCalculatorUrl,
+                            fullWidth: true,
+                        },
+                    ])}
                 </div>
 
                 {ai.warning && (
@@ -1641,28 +1760,29 @@ export function ReportPage() {
                                 * all combat data is normalized by fight length
                             </p>
                             <div className="flex flex-col gap-3 md:flex-row">
-                            <input
-                                type="text"
-                                value={abilitySearch}
-                                onChange={(event) =>
-                                    setAbilitySearch(event.target.value)
-                                }
-                                placeholder="Filter abilities"
-                                className="w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-sm text-white outline-none transition focus:border-sky-500 md:max-w-sm"
-                            />
-                            <select
-                                value={abilityFilter}
-                                onChange={(event) =>
-                                    setAbilityFilter(
-                                        event.target.value as ComparisonFilter,
-                                    )
-                                }
-                                className="rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-sm text-white outline-none transition focus:border-sky-500"
-                            >
-                                <option value="all">All abilities</option>
-                                <option value="behind">Only behind</option>
-                                <option value="ahead">Only ahead</option>
-                            </select>
+                                <input
+                                    type="text"
+                                    value={abilitySearch}
+                                    onChange={(event) =>
+                                        setAbilitySearch(event.target.value)
+                                    }
+                                    placeholder="Filter abilities"
+                                    className="w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-sm text-white outline-none transition focus:border-sky-500 md:max-w-sm"
+                                />
+                                <select
+                                    value={abilityFilter}
+                                    onChange={(event) =>
+                                        setAbilityFilter(
+                                            event.target
+                                                .value as ComparisonFilter,
+                                        )
+                                    }
+                                    className="rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-sm text-white outline-none transition focus:border-sky-500"
+                                >
+                                    <option value="all">All abilities</option>
+                                    <option value="behind">Only behind</option>
+                                    <option value="ahead">Only ahead</option>
+                                </select>
                             </div>
                         </div>
                         {orderedAbilityUsage.length > 0 ? (
@@ -1908,8 +2028,9 @@ export function ReportPage() {
                     <div className="rounded-3xl border border-slate-800 bg-slate-950/80 p-6">
                         <div className="mb-6 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                             <p className="text-xs text-slate-400">
-                                * resource comparisons show average bar level,
-                                capped time, and total spent versus elite medians
+                                * resource rows summarize the same timeline
+                                data: full/waste markers and total time spent in
+                                full windows
                             </p>
                             <div className="flex flex-col gap-3 md:flex-row">
                                 <input
@@ -1933,10 +2054,10 @@ export function ReportPage() {
                                 >
                                     <option value="all">All resources</option>
                                     <option value="behind">
-                                        More capped time than elites
+                                        More full time than elites
                                     </option>
                                     <option value="ahead">
-                                        Less capped time than elites
+                                        Less full time than elites
                                     </option>
                                 </select>
                             </div>
@@ -1950,16 +2071,10 @@ export function ReportPage() {
                                                 Resource
                                             </th>
                                             <th className="pb-3 pr-4 font-medium">
-                                                Avg Level
+                                                Full Markers
                                             </th>
                                             <th className="pb-3 pr-4 font-medium">
-                                                Time Capped
-                                            </th>
-                                            <th className="pb-3 pr-4 font-medium">
-                                                Spent
-                                            </th>
-                                            <th className="pb-3 pr-4 font-medium">
-                                                Notes
+                                                Full Window Time
                                             </th>
                                         </tr>
                                     </thead>
@@ -1980,74 +2095,50 @@ export function ReportPage() {
                                                     </p>
                                                     <p className="mt-1 text-xs text-slate-500">
                                                         {entry.sampleSize} elite
-                                                        samples
+                                                        comparisons
                                                     </p>
                                                 </td>
                                                 <td className="py-4 pr-4 text-slate-200">
                                                     <p>
-                                                        {entry.playerAveragePct.toFixed(
-                                                            1,
-                                                        )}
-                                                        %
-                                                    </p>
-                                                    <p className="mt-1 text-xs text-slate-500">
-                                                        {formatSigned(
-                                                            entry.averagePctDelta,
-                                                            "%",
-                                                            1,
-                                                        )}{" "}
-                                                        vs elite
-                                                    </p>
-                                                </td>
-                                                <td className="py-4 pr-4">
-                                                    <p className="text-slate-200">
-                                                        {entry.playerTimeAtMaxSeconds.toFixed(
-                                                            1,
-                                                        )}
-                                                        s
+                                                        {
+                                                            entry.playerFullMarkerCount
+                                                        }
                                                     </p>
                                                     <p
                                                         className={
-                                                            entry.timeAtMaxDeltaSeconds <=
+                                                            entry.fullMarkerDelta <=
                                                             0
                                                                 ? "mt-1 text-xs text-emerald-400"
                                                                 : "mt-1 text-xs text-rose-400"
                                                         }
                                                     >
                                                         {formatSigned(
-                                                            entry.timeAtMaxDeltaSeconds,
-                                                            "s",
-                                                            1,
-                                                        )}{" "}
-                                                        vs elite
-                                                    </p>
-                                                </td>
-                                                <td className="py-4 pr-4">
-                                                    <p className="text-slate-200">
-                                                        {entry.playerSpent.toFixed(1)}
-                                                    </p>
-                                                    <p
-                                                        className={
-                                                            entry.spentDelta >=
-                                                            0
-                                                                ? "mt-1 text-xs text-emerald-400"
-                                                                : "mt-1 text-xs text-rose-400"
-                                                        }
-                                                    >
-                                                        {formatSigned(
-                                                            entry.spentDelta,
+                                                            entry.fullMarkerDelta,
                                                             "",
-                                                            1,
+                                                            0,
                                                         )}{" "}
                                                         vs elite
                                                     </p>
                                                 </td>
                                                 <td className="py-4 pr-4">
-                                                    {entry.caution && (
-                                                        <p className="text-xs text-amber-300">
-                                                            {entry.caution}
-                                                        </p>
-                                                    )}
+                                                    <p className="text-slate-200">
+                                                        {formatSeconds(
+                                                            entry.playerFullWindowSeconds,
+                                                        )}
+                                                    </p>
+                                                    <p
+                                                        className={
+                                                            entry.fullWindowDeltaSeconds <=
+                                                            0
+                                                                ? "mt-1 text-xs text-emerald-400"
+                                                                : "mt-1 text-xs text-rose-400"
+                                                        }
+                                                    >
+                                                        {formatSignedSeconds(
+                                                            entry.fullWindowDeltaSeconds,
+                                                        )}{" "}
+                                                        vs elite
+                                                    </p>
                                                 </td>
                                             </tr>
                                         ))}

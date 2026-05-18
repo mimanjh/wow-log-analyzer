@@ -3,29 +3,30 @@ package service
 import (
 	"math"
 	"sort"
+	"strings"
 	"time"
 
 	"wow-log-analyzer/services/analysis-service/internal/types"
 )
 
 type abilityUsageSummary struct {
-	AbilityID        int
-	AbilityName      string
-	Count            int
-	CastsPerMinute   float64
-	FirstUseSeconds  float64
-	HasFirstUse      bool
+	AbilityID       int
+	AbilityName     string
+	Count           int
+	CastsPerMinute  float64
+	FirstUseSeconds float64
+	HasFirstUse     bool
 }
 
 type buffUptimeSummary struct {
-	AbilityID          int
-	AbilityName        string
-	UptimePct          float64
-	FirstApplySeconds  float64
-	HasFirstApply      bool
+	AbilityID         int
+	AbilityName       string
+	UptimePct         float64
+	FirstApplySeconds float64
+	HasFirstApply     bool
 }
 
-func (s *AnalysisService) CalculateAbilityUsageComparisons(playerData types.PlayerFightData, cohortData []types.PlayerFightData) []types.AbilityUsageComparison {
+func (s *AnalysisService) CalculateAbilityUsageComparisons(playerData types.PlayerFightData, cohortData []types.PlayerFightData, characterClass, characterSpec string) []types.AbilityUsageComparison {
 	playerSummary := summarizeAbilityUsage(playerData)
 	cohortSummaries := make([]map[int]abilityUsageSummary, len(cohortData))
 	abilityNames := make(map[int]string)
@@ -106,7 +107,7 @@ func (s *AnalysisService) CalculateAbilityUsageComparisons(playerData types.Play
 		return comparisons[i].CohortMedianCount > comparisons[j].CohortMedianCount
 	})
 
-	return filterTopAbilityComparisons(comparisons, 12)
+	return filterTopAbilityComparisons(comparisons, 12, trackedAbilityNamesForSpec(characterClass, characterSpec))
 }
 
 func (s *AnalysisService) CalculateBuffUptimeComparisons(playerData types.PlayerFightData, cohortData []types.PlayerFightData) []types.BuffUptimeComparison {
@@ -225,6 +226,27 @@ func summarizeAbilityUsage(data types.PlayerFightData) map[int]abilityUsageSumma
 		summaries[event.Ability.ID] = summary
 	}
 
+	castOrDamageAbilityIDs := make(map[int]bool, len(summaries))
+	for abilityID := range summaries {
+		castOrDamageAbilityIDs[abilityID] = true
+	}
+	for _, event := range data.CooldownEvents {
+		if event.Ability.ID == 0 || event.Ability.Name == "" || event.EventType != "start" {
+			continue
+		}
+		if castOrDamageAbilityIDs[event.Ability.ID] {
+			continue
+		}
+
+		summary := summaries[event.Ability.ID]
+		summary.AbilityID = event.Ability.ID
+		summary.AbilityName = event.Ability.Name
+		summary.Count++
+		summary.FirstUseSeconds = event.Timestamp.Sub(data.FightStart).Seconds()
+		summary.HasFirstUse = true
+		summaries[event.Ability.ID] = summary
+	}
+
 	for abilityID, summary := range summaries {
 		summary.CastsPerMinute = float64(summary.Count) / durationMinutes
 		summaries[abilityID] = summary
@@ -340,7 +362,7 @@ func calculateMedianCopy(values []float64) float64 {
 	return sorted[middle]
 }
 
-func filterTopAbilityComparisons(values []types.AbilityUsageComparison, limit int) []types.AbilityUsageComparison {
+func filterTopAbilityComparisons(values []types.AbilityUsageComparison, limit int, priorityNames map[string]bool) []types.AbilityUsageComparison {
 	filtered := make([]types.AbilityUsageComparison, 0, len(values))
 	for _, value := range values {
 		if value.PlayerCount == 0 && value.CohortMedianCount == 0 {
@@ -351,7 +373,48 @@ func filterTopAbilityComparisons(values []types.AbilityUsageComparison, limit in
 	if len(filtered) <= limit {
 		return filtered
 	}
-	return filtered[:limit]
+
+	selected := append([]types.AbilityUsageComparison(nil), filtered[:limit]...)
+	selectedNames := make(map[string]bool, len(selected))
+	for _, value := range selected {
+		selectedNames[normalizeAbilityName(value.AbilityName)] = true
+	}
+	for _, value := range filtered[limit:] {
+		normalizedName := normalizeAbilityName(value.AbilityName)
+		if !priorityNames[normalizedName] || selectedNames[normalizedName] {
+			continue
+		}
+		selected[len(selected)-1] = value
+		selectedNames[normalizedName] = true
+	}
+	sort.SliceStable(selected, func(i, j int) bool {
+		leftPriority := priorityNames[normalizeAbilityName(selected[i].AbilityName)]
+		rightPriority := priorityNames[normalizeAbilityName(selected[j].AbilityName)]
+		if leftPriority != rightPriority {
+			return leftPriority
+		}
+		if selected[i].CohortMedianCount == selected[j].CohortMedianCount {
+			return selected[i].AbilityName < selected[j].AbilityName
+		}
+		return selected[i].CohortMedianCount > selected[j].CohortMedianCount
+	})
+	return selected
+}
+
+func trackedAbilityNamesForSpec(characterClass, characterSpec string) map[string]bool {
+	key := normalizeAbilityName(strings.TrimSpace(characterSpec) + " " + strings.TrimSpace(characterClass))
+	switch key {
+	case "blood death knight", "blood deathknight":
+		return map[string]bool{
+			"dancing rune weapon": true,
+		}
+	default:
+		return nil
+	}
+}
+
+func normalizeAbilityName(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
 }
 
 func filterTopBuffComparisons(values []types.BuffUptimeComparison, limit int) []types.BuffUptimeComparison {

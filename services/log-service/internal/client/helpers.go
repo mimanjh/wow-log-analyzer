@@ -623,15 +623,35 @@ func buildCharacterOption(payload map[string]interface{}, role string, actors []
 	if actorID == 0 {
 		actorID = id
 	}
+	talentLookupIDs := []int{actorID}
+	if id != actorID {
+		talentLookupIDs = append(talentLookupIDs, id)
+	}
+	if actor, ok := findActorByID(actorID, actors); ok {
+		gameID := int(actor.GameID)
+		if gameID > 0 {
+			talentLookupIDs = append(talentLookupIDs, gameID)
+		}
+	}
 
 	return types.CharacterOption{
-		ID:         actorID,
-		Name:       name,
-		Class:      className,
-		Spec:       spec,
-		Role:       role,
-		ServerName: strings.TrimSpace(serverByID[actorID]),
+		ID:              actorID,
+		Name:            name,
+		Class:           className,
+		Spec:            spec,
+		Role:            role,
+		ServerName:      strings.TrimSpace(serverByID[actorID]),
+		TalentLookupIDs: uniquePositiveInts(talentLookupIDs),
 	}, true
+}
+
+func findActorByID(actorID int, actors []WCLActor) (WCLActor, bool) {
+	for _, actor := range actors {
+		if actor.ID == actorID {
+			return actor, true
+		}
+	}
+	return WCLActor{}, false
 }
 
 func resolveActorID(playerDetailID int, name, className string, actors []WCLActor) int {
@@ -661,6 +681,22 @@ func resolveActorID(playerDetailID int, name, className string, actors []WCLActo
 	}
 
 	return 0
+}
+
+func uniquePositiveInts(values []int) []int {
+	unique := make([]int, 0, len(values))
+	seen := make(map[int]struct{}, len(values))
+	for _, value := range values {
+		if value <= 0 {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		unique = append(unique, value)
+	}
+	return unique
 }
 
 func extractSpecName(payload map[string]interface{}) string {

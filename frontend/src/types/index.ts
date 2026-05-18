@@ -101,6 +101,8 @@ export interface Character {
   spec: string
   role: string
   serverName?: string
+  talentImportCode?: string
+  talentCalculatorUrl?: string
 }
 
 export interface ComparisonResult {
@@ -337,6 +339,15 @@ export interface BuffUptimeComparison {
 export interface ResourceUsageComparison {
   resourceTypeId: number
   resourceType: string
+  playerSampleCount: number
+  cohortMedianSampleCount: number
+  sampleCountDelta: number
+  playerFullMarkerCount: number
+  cohortMedianFullMarkerCount: number
+  fullMarkerDelta: number
+  playerFullWindowSeconds: number
+  cohortMedianFullWindowSeconds: number
+  fullWindowDeltaSeconds: number
   playerAveragePct: number
   cohortMedianAveragePct: number
   averagePctDelta: number

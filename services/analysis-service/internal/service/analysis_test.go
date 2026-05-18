@@ -187,7 +187,7 @@ func TestAnalysisService_UsageComparisons(t *testing.T) {
 		},
 	}
 
-	abilityComparisons := service.CalculateAbilityUsageComparisons(playerData, cohortData)
+	abilityComparisons := service.CalculateAbilityUsageComparisons(playerData, cohortData, "Rogue", "Subtlety")
 	if len(abilityComparisons) == 0 {
 		t.Fatalf("expected ability comparisons to be populated")
 	}
@@ -207,6 +207,51 @@ func TestAnalysisService_UsageComparisons(t *testing.T) {
 	}
 	if buffComparisons[0].PlayerUptimePct <= 0 {
 		t.Fatalf("expected positive player uptime, got %f", buffComparisons[0].PlayerUptimePct)
+	}
+}
+
+func TestAnalysisService_AbilityUsageIncludesBloodDeathKnightCooldowns(t *testing.T) {
+	service := NewAnalysisService()
+	start := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+
+	playerData := types.PlayerFightData{
+		PlayerID:   1,
+		FightID:    100,
+		FightStart: start,
+		FightEnd:   start.Add(5 * time.Minute),
+		CooldownEvents: []types.CooldownEvent{
+			{Timestamp: start.Add(15 * time.Second), Ability: types.Ability{ID: 49028, Name: "Dancing Rune Weapon", IsMajorCD: true}, SourceID: 1, EventType: "start"},
+		},
+	}
+	cohortData := []types.PlayerFightData{
+		{
+			PlayerID:   2,
+			FightID:    100,
+			FightStart: start,
+			FightEnd:   start.Add(5 * time.Minute),
+			CooldownEvents: []types.CooldownEvent{
+				{Timestamp: start.Add(10 * time.Second), Ability: types.Ability{ID: 49028, Name: "Dancing Rune Weapon", IsMajorCD: true}, SourceID: 2, EventType: "start"},
+				{Timestamp: start.Add(140 * time.Second), Ability: types.Ability{ID: 49028, Name: "Dancing Rune Weapon", IsMajorCD: true}, SourceID: 2, EventType: "start"},
+			},
+		},
+	}
+
+	comparisons := service.CalculateAbilityUsageComparisons(playerData, cohortData, "Death Knight", "Blood")
+	var dancingRuneWeapon *types.AbilityUsageComparison
+	for index := range comparisons {
+		if comparisons[index].AbilityName == "Dancing Rune Weapon" {
+			dancingRuneWeapon = &comparisons[index]
+			break
+		}
+	}
+	if dancingRuneWeapon == nil {
+		t.Fatalf("expected Dancing Rune Weapon to be included in ability usage")
+	}
+	if dancingRuneWeapon.PlayerCount != 1 {
+		t.Fatalf("expected player count 1, got %d", dancingRuneWeapon.PlayerCount)
+	}
+	if dancingRuneWeapon.CohortMedianCount != 2 {
+		t.Fatalf("expected cohort median count 2, got %f", dancingRuneWeapon.CohortMedianCount)
 	}
 }
 
@@ -285,10 +330,93 @@ func TestAnalysisService_ResourceUsageUsesAverageCapAndSpent(t *testing.T) {
 	if got.PlayerTimeAtMaxSeconds != 30 {
 		t.Fatalf("expected player time at max 30s, got %f", got.PlayerTimeAtMaxSeconds)
 	}
+	if got.PlayerFullMarkerCount != 1 {
+		t.Fatalf("expected player full marker count 1, got %d", got.PlayerFullMarkerCount)
+	}
+	if got.PlayerFullWindowSeconds != 30 {
+		t.Fatalf("expected player full window time 30s, got %f", got.PlayerFullWindowSeconds)
+	}
 	if got.PlayerSpent != 50 {
 		t.Fatalf("expected player spent 50, got %f", got.PlayerSpent)
 	}
 	if got.CohortMedianSpent != 75 {
 		t.Fatalf("expected cohort spent 75, got %f", got.CohortMedianSpent)
+	}
+}
+
+func TestAnalysisService_ResourceUsageUsesDefaultMaxWhenSamplesOmitMax(t *testing.T) {
+	service := NewAnalysisService()
+	start := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+
+	playerData := types.PlayerFightData{
+		PlayerID:   1,
+		FightID:    100,
+		FightStart: start,
+		FightEnd:   start.Add(60 * time.Second),
+		ResourceEvents: []types.ResourceEvent{
+			{Timestamp: start, ResourceTypeID: 6, ResourceType: "Runic Power", Amount: 80},
+			{Timestamp: start.Add(30 * time.Second), ResourceTypeID: 6, ResourceType: "Runic Power", Amount: 20},
+		},
+	}
+	cohortData := []types.PlayerFightData{
+		{
+			PlayerID:   2,
+			FightID:    100,
+			FightStart: start,
+			FightEnd:   start.Add(60 * time.Second),
+			ResourceEvents: []types.ResourceEvent{
+				{Timestamp: start, ResourceTypeID: 6, ResourceType: "Runic Power", Amount: 40},
+				{Timestamp: start.Add(30 * time.Second), ResourceTypeID: 6, ResourceType: "Runic Power", Amount: 20},
+			},
+		},
+	}
+
+	comparisons := service.CalculateResourceUsageComparisons(playerData, cohortData, "Death Knight", "Blood")
+	if len(comparisons) != 1 {
+		t.Fatalf("expected one resource comparison, got %d", len(comparisons))
+	}
+
+	got := comparisons[0]
+	if got.PlayerAveragePct != 50 {
+		t.Fatalf("expected player average pct 50, got %f", got.PlayerAveragePct)
+	}
+	if got.PlayerSpent != 60 {
+		t.Fatalf("expected inferred spent 60, got %f", got.PlayerSpent)
+	}
+}
+
+func TestAnalysisService_ResourceUsageMatchesTimelineChangeFallback(t *testing.T) {
+	service := NewAnalysisService()
+	start := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+
+	playerData := types.PlayerFightData{
+		PlayerID:   1,
+		FightID:    100,
+		FightStart: start,
+		FightEnd:   start.Add(60 * time.Second),
+		ResourceEvents: []types.ResourceEvent{
+			{Timestamp: start, ResourceTypeID: 6, ResourceType: "Runic Power", Change: 80},
+			{Timestamp: start.Add(30 * time.Second), ResourceTypeID: 6, ResourceType: "Runic Power", Change: 20},
+		},
+	}
+	cohortData := []types.PlayerFightData{
+		{
+			PlayerID:   2,
+			FightID:    100,
+			FightStart: start,
+			FightEnd:   start.Add(60 * time.Second),
+			ResourceEvents: []types.ResourceEvent{
+				{Timestamp: start, ResourceTypeID: 6, ResourceType: "Runic Power", Change: 40},
+				{Timestamp: start.Add(30 * time.Second), ResourceTypeID: 6, ResourceType: "Runic Power", Change: 20},
+			},
+		},
+	}
+
+	comparisons := service.CalculateResourceUsageComparisons(playerData, cohortData, "Death Knight", "Blood")
+	if len(comparisons) != 1 {
+		t.Fatalf("expected one resource comparison, got %d", len(comparisons))
+	}
+	if comparisons[0].PlayerAveragePct != 50 {
+		t.Fatalf("expected player average pct 50, got %f", comparisons[0].PlayerAveragePct)
 	}
 }

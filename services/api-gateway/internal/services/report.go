@@ -225,6 +225,15 @@ type BuffUptimeComparison struct {
 type ResourceUsageComparison struct {
 	ResourceTypeID                 int     `json:"resourceTypeId"`
 	ResourceType                   string  `json:"resourceType"`
+	PlayerSampleCount              int     `json:"playerSampleCount"`
+	CohortMedianSampleCount        float64 `json:"cohortMedianSampleCount"`
+	SampleCountDelta               float64 `json:"sampleCountDelta"`
+	PlayerFullMarkerCount          int     `json:"playerFullMarkerCount"`
+	CohortMedianFullMarkerCount    float64 `json:"cohortMedianFullMarkerCount"`
+	FullMarkerDelta                float64 `json:"fullMarkerDelta"`
+	PlayerFullWindowSeconds        float64 `json:"playerFullWindowSeconds"`
+	CohortMedianFullWindowSeconds  float64 `json:"cohortMedianFullWindowSeconds"`
+	FullWindowDeltaSeconds         float64 `json:"fullWindowDeltaSeconds"`
 	PlayerAveragePct               float64 `json:"playerAveragePct"`
 	CohortMedianAveragePct         float64 `json:"cohortMedianAveragePct"`
 	AveragePctDelta                float64 `json:"averagePctDelta"`
@@ -393,6 +402,7 @@ type timelineFightData struct {
 	FightEnd       time.Time               `json:"fightEnd"`
 	CastEvents     []timelineAbilityEvent  `json:"castEvents"`
 	DamageEvents   []timelineAbilityEvent  `json:"damageEvents"`
+	CooldownEvents []timelineAbilityEvent  `json:"cooldownEvents"`
 	BuffEvents     []timelineBuffEvent     `json:"buffEvents"`
 	ResourceEvents []timelineResourceEvent `json:"resourceEvents"`
 }
@@ -963,6 +973,14 @@ func buildAbilityTimelineSeries(data timelineFightData, abilityID int, label, su
 		casts = append(casts, event.Timestamp.Sub(data.FightStart).Milliseconds())
 	}
 	if len(casts) == 0 {
+		for _, event := range data.CooldownEvents {
+			if event.Ability.ID != abilityID {
+				continue
+			}
+			casts = append(casts, event.Timestamp.Sub(data.FightStart).Milliseconds())
+		}
+	}
+	if len(casts) == 0 {
 		for _, event := range data.DamageEvents {
 			if event.Ability.ID != abilityID {
 				continue
@@ -986,6 +1004,11 @@ func findAbilityName(data timelineFightData, abilityID int) string {
 		}
 	}
 	for _, event := range data.DamageEvents {
+		if event.Ability.ID == abilityID {
+			return event.Ability.Name
+		}
+	}
+	for _, event := range data.CooldownEvents {
 		if event.Ability.ID == abilityID {
 			return event.Ability.Name
 		}
@@ -1015,9 +1038,17 @@ func buildResourceTimelineSeries(data timelineFightData, resourceTypeID int, lab
 		if sample.Value == 0 && event.Change > 0 {
 			sample.Value = event.Change
 		}
+		maxValue := sample.MaxValue
+		if maxValue <= 0 {
+			maxValue = defaultResourceMaxValue(event.ResourceTypeID, event.ResourceType)
+			sample.MaxValue = maxValue
+		}
+		if event.Waste > 0 && maxValue > 0 {
+			sample.Value = maxValue
+		}
 		samples = append(samples, sample)
 
-		if event.Waste > 0 || (event.MaxAmount > 0 && event.Amount >= event.MaxAmount) {
+		if event.Waste > 0 || (maxValue > 0 && sample.Value >= maxValue) {
 			wasteMarkers = append(wasteMarkers, timestampMS)
 		}
 	}
@@ -1036,6 +1067,40 @@ func buildResourceTimelineSeries(data timelineFightData, resourceTypeID int, lab
 		DurationMS:   data.FightEnd.Sub(data.FightStart).Milliseconds(),
 		Samples:      samples,
 		WasteMarkers: wasteMarkers,
+	}
+}
+
+func defaultResourceMaxValue(resourceTypeID int, resourceType string) float64 {
+	switch resourceTypeID {
+	case 1, 2, 3, 6, 8, 13, 18:
+		return 100
+	case 4, 7, 9:
+		return 5
+	case 5, 12, 19:
+		return 6
+	case 11:
+		return 10
+	case 16:
+		return 4
+	case 17:
+		return 120
+	}
+
+	switch strings.ToLower(strings.TrimSpace(resourceType)) {
+	case "rage", "focus", "energy", "runic power", "lunar power", "insanity", "pain":
+		return 100
+	case "fury":
+		return 120
+	case "combo points", "soul shards", "holy power":
+		return 5
+	case "runes", "chi", "essence":
+		return 6
+	case "maelstrom":
+		return 10
+	case "arcane charges":
+		return 4
+	default:
+		return 0
 	}
 }
 

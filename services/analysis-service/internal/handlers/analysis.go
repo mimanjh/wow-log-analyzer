@@ -90,7 +90,7 @@ func (h *AnalysisHandler) CompareFight(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	comparison.AbilityUsage = h.analysisService.CalculateAbilityUsageComparisons(req.PlayerData, req.CohortData)
+	comparison.AbilityUsage = h.analysisService.CalculateAbilityUsageComparisons(req.PlayerData, req.CohortData, req.CharacterClass, req.CharacterSpec)
 	comparison.BuffUptimes = h.analysisService.CalculateBuffUptimeComparisons(req.PlayerData, req.CohortData)
 	comparison.ResourceUsage = h.analysisService.CalculateResourceUsageComparisons(req.PlayerData, req.CohortData, req.CharacterClass, req.CharacterSpec)
 
