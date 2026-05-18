@@ -175,6 +175,7 @@ export interface ResourceTimelineSeries {
   label: string
   subtitle?: string
   reportUrl?: string
+  durationMs: number
   samples: ResourceTimelineSample[]
   wasteMarkersMs?: number[]
 }
@@ -336,6 +337,15 @@ export interface BuffUptimeComparison {
 export interface ResourceUsageComparison {
   resourceTypeId: number
   resourceType: string
+  playerAveragePct: number
+  cohortMedianAveragePct: number
+  averagePctDelta: number
+  playerTimeAtMaxSeconds: number
+  cohortMedianTimeAtMaxSeconds: number
+  timeAtMaxDeltaSeconds: number
+  playerSpent: number
+  cohortMedianSpent: number
+  spentDelta: number
   playerGeneratedPerMinute: number
   cohortMedianGeneratedPerMinute: number
   generatedDelta: number

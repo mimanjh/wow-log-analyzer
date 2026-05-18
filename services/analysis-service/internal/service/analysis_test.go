@@ -12,8 +12,8 @@ func TestAnalysisService_AnalyzePlayerFight(t *testing.T) {
 
 	// Create test data
 	playerData := types.PlayerFightData{
-		PlayerID: 1,
-		FightID:  100,
+		PlayerID:   1,
+		FightID:    100,
 		FightStart: time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC),
 		FightEnd:   time.Date(2024, 1, 1, 12, 5, 0, 0, time.UTC), // 5 minutes
 		CastEvents: []types.CastEvent{
@@ -75,8 +75,8 @@ func TestAnalysisService_CompareAgainstCohort(t *testing.T) {
 
 	// Create player data
 	playerData := types.PlayerFightData{
-		PlayerID: 1,
-		FightID:  100,
+		PlayerID:   1,
+		FightID:    100,
 		FightStart: time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC),
 		FightEnd:   time.Date(2024, 1, 1, 12, 5, 0, 0, time.UTC),
 		CastEvents: []types.CastEvent{
@@ -88,8 +88,8 @@ func TestAnalysisService_CompareAgainstCohort(t *testing.T) {
 	// Create cohort data (3 players with different performance)
 	cohortData := []types.PlayerFightData{
 		{
-			PlayerID: 2,
-			FightID:  100,
+			PlayerID:   2,
+			FightID:    100,
 			FightStart: time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC),
 			FightEnd:   time.Date(2024, 1, 1, 12, 5, 0, 0, time.UTC),
 			CastEvents: []types.CastEvent{
@@ -97,8 +97,8 @@ func TestAnalysisService_CompareAgainstCohort(t *testing.T) {
 			},
 		},
 		{
-			PlayerID: 3,
-			FightID:  100,
+			PlayerID:   3,
+			FightID:    100,
 			FightStart: time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC),
 			FightEnd:   time.Date(2024, 1, 1, 12, 5, 0, 0, time.UTC),
 			CastEvents: []types.CastEvent{
@@ -108,8 +108,8 @@ func TestAnalysisService_CompareAgainstCohort(t *testing.T) {
 			},
 		},
 		{
-			PlayerID: 4,
-			FightID:  100,
+			PlayerID:   4,
+			FightID:    100,
 			FightStart: time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC),
 			FightEnd:   time.Date(2024, 1, 1, 12, 5, 0, 0, time.UTC),
 			CastEvents: []types.CastEvent{
@@ -243,5 +243,52 @@ func TestAnalysisService_BuffUptimeComparisonClampsInvalidTimestamps(t *testing.
 	}
 	if buffComparisons[0].PlayerUptimePct > 100 {
 		t.Fatalf("expected clamped uptime <= 100, got %f", buffComparisons[0].PlayerUptimePct)
+	}
+}
+
+func TestAnalysisService_ResourceUsageUsesAverageCapAndSpent(t *testing.T) {
+	service := NewAnalysisService()
+	start := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+
+	playerData := types.PlayerFightData{
+		PlayerID:   1,
+		FightID:    100,
+		FightStart: start,
+		FightEnd:   start.Add(60 * time.Second),
+		ResourceEvents: []types.ResourceEvent{
+			{Timestamp: start, ResourceTypeID: 3, ResourceType: "Energy", Amount: 100, MaxAmount: 100},
+			{Timestamp: start.Add(30 * time.Second), ResourceTypeID: 3, ResourceType: "Energy", Amount: 50, MaxAmount: 100, Change: -50},
+		},
+	}
+	cohortData := []types.PlayerFightData{
+		{
+			PlayerID:   2,
+			FightID:    100,
+			FightStart: start,
+			FightEnd:   start.Add(60 * time.Second),
+			ResourceEvents: []types.ResourceEvent{
+				{Timestamp: start, ResourceTypeID: 3, ResourceType: "Energy", Amount: 50, MaxAmount: 100},
+				{Timestamp: start.Add(30 * time.Second), ResourceTypeID: 3, ResourceType: "Energy", Amount: 25, MaxAmount: 100, Change: -75},
+			},
+		},
+	}
+
+	comparisons := service.CalculateResourceUsageComparisons(playerData, cohortData, "Rogue", "Outlaw")
+	if len(comparisons) != 1 {
+		t.Fatalf("expected one resource comparison, got %d", len(comparisons))
+	}
+
+	got := comparisons[0]
+	if got.PlayerAveragePct != 75 {
+		t.Fatalf("expected player average pct 75, got %f", got.PlayerAveragePct)
+	}
+	if got.PlayerTimeAtMaxSeconds != 30 {
+		t.Fatalf("expected player time at max 30s, got %f", got.PlayerTimeAtMaxSeconds)
+	}
+	if got.PlayerSpent != 50 {
+		t.Fatalf("expected player spent 50, got %f", got.PlayerSpent)
+	}
+	if got.CohortMedianSpent != 75 {
+		t.Fatalf("expected cohort spent 75, got %f", got.CohortMedianSpent)
 	}
 }

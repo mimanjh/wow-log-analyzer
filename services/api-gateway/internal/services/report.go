@@ -56,6 +56,7 @@ type ResourceTimelineSeries struct {
 	Label        string                   `json:"label"`
 	Subtitle     string                   `json:"subtitle,omitempty"`
 	ReportURL    string                   `json:"reportUrl,omitempty"`
+	DurationMS   int64                    `json:"durationMs"`
 	Samples      []ResourceTimelineSample `json:"samples"`
 	WasteMarkers []int64                  `json:"wasteMarkersMs,omitempty"`
 }
@@ -224,6 +225,15 @@ type BuffUptimeComparison struct {
 type ResourceUsageComparison struct {
 	ResourceTypeID                 int     `json:"resourceTypeId"`
 	ResourceType                   string  `json:"resourceType"`
+	PlayerAveragePct               float64 `json:"playerAveragePct"`
+	CohortMedianAveragePct         float64 `json:"cohortMedianAveragePct"`
+	AveragePctDelta                float64 `json:"averagePctDelta"`
+	PlayerTimeAtMaxSeconds         float64 `json:"playerTimeAtMaxSeconds"`
+	CohortMedianTimeAtMaxSeconds   float64 `json:"cohortMedianTimeAtMaxSeconds"`
+	TimeAtMaxDeltaSeconds          float64 `json:"timeAtMaxDeltaSeconds"`
+	PlayerSpent                    float64 `json:"playerSpent"`
+	CohortMedianSpent              float64 `json:"cohortMedianSpent"`
+	SpentDelta                     float64 `json:"spentDelta"`
 	PlayerGeneratedPerMinute       float64 `json:"playerGeneratedPerMinute"`
 	CohortMedianGeneratedPerMinute float64 `json:"cohortMedianGeneratedPerMinute"`
 	GeneratedDelta                 float64 `json:"generatedDelta"`
@@ -273,10 +283,11 @@ type analysisCompareRequest struct {
 }
 
 type insightGenerationRequest struct {
-	Context           insightContext     `json:"context"`
-	Metrics           []insightMetric    `json:"metrics"`
-	AbilityHighlights []insightHighlight `json:"abilityHighlights,omitempty"`
-	BuffHighlights    []insightHighlight `json:"buffHighlights,omitempty"`
+	Context            insightContext     `json:"context"`
+	Metrics            []insightMetric    `json:"metrics"`
+	AbilityHighlights  []insightHighlight `json:"abilityHighlights,omitempty"`
+	BuffHighlights     []insightHighlight `json:"buffHighlights,omitempty"`
+	ResourceHighlights []insightHighlight `json:"resourceHighlights,omitempty"`
 }
 
 type insightContext struct {
@@ -430,8 +441,9 @@ type ReportService struct {
 }
 
 const (
-	targetEliteCount    = 10
-	rankingCandidateCap = 25
+	targetEliteCount         = 10
+	rankingCandidateBatchCap = 25
+	rankingCandidateMaxCap   = 100
 )
 
 func NewReportService(logURL, analysisURL, aiURL string) *ReportService {
@@ -636,38 +648,55 @@ func (s *ReportService) runJob(jobID string, req GenerateReportRequest) {
 	}
 
 	s.updateJob(jobID, ReportJobRunning, "rankings", "Fetching ranking candidates for the selected boss and spec.", ReportJobProgress{Current: 2, Total: 5}, "", nil)
-	candidates, err := s.fetchRankingCandidates(ctx, req)
-	if err != nil {
-		s.updateJob(jobID, ReportJobFailed, "rankings", "Failed to fetch ranking candidates.", ReportJobProgress{Current: 2, Total: 5}, err.Error(), nil)
-		return
-	}
-	if len(candidates) == 0 {
-		s.updateJob(jobID, ReportJobFailed, "rankings", "No ranking candidates were available for this fight.", ReportJobProgress{Current: 2, Total: 5}, "no ranking candidates returned", nil)
-		return
-	}
+	cohortData := make([]json.RawMessage, 0, targetEliteCount)
+	cohortEntries := make([]CohortEntry, 0, targetEliteCount)
+	cohortTimelineData := make([]timelineFightData, 0, targetEliteCount)
+	processedCandidates := make(map[string]bool)
 
-	cohortData := make([]json.RawMessage, 0, len(candidates))
-	cohortEntries := make([]CohortEntry, 0, len(candidates))
-	cohortTimelineData := make([]timelineFightData, 0, len(candidates))
-	for index, candidate := range candidates {
-		s.updateJob(jobID, ReportJobRunning, "cohort", fmt.Sprintf("Fetching cohort member %d of %d.", index+1, len(candidates)), ReportJobProgress{Current: index + 1, Total: len(candidates)}, "", nil)
-		memberData, err := s.fetchCohortMember(ctx, candidate)
+	for candidateLimit := rankingCandidateBatchCap; len(cohortData) < targetEliteCount && candidateLimit <= rankingCandidateMaxCap; candidateLimit += rankingCandidateBatchCap {
+		candidates, err := s.fetchRankingCandidates(ctx, req, candidateLimit)
 		if err != nil {
-			continue
+			s.updateJob(jobID, ReportJobFailed, "rankings", "Failed to fetch ranking candidates.", ReportJobProgress{Current: 2, Total: 5}, err.Error(), nil)
+			return
 		}
-		decodedTimeline, err := decodeTimelineFightData(memberData)
-		if err != nil {
-			continue
+		if len(candidates) == 0 {
+			break
 		}
-		cohortData = append(cohortData, memberData)
-		cohortEntries = append(cohortEntries, buildCohortEntry(candidate))
-		cohortTimelineData = append(cohortTimelineData, decodedTimeline)
-		if len(cohortData) == targetEliteCount {
+
+		newCandidates := 0
+		for index, candidate := range candidates {
+			key := rankingCandidateKey(candidate)
+			if processedCandidates[key] {
+				continue
+			}
+			processedCandidates[key] = true
+			newCandidates++
+
+			s.updateJob(jobID, ReportJobRunning, "cohort", fmt.Sprintf("Fetching cohort member %d of %d.", len(cohortData)+1, targetEliteCount), ReportJobProgress{Current: len(cohortData) + 1, Total: targetEliteCount}, "", nil)
+			memberData, err := s.fetchCohortMember(ctx, candidate)
+			if err != nil {
+				continue
+			}
+			decodedTimeline, err := decodeTimelineFightData(memberData)
+			if err != nil {
+				continue
+			}
+			cohortData = append(cohortData, memberData)
+			cohortEntries = append(cohortEntries, buildCohortEntry(candidate))
+			cohortTimelineData = append(cohortTimelineData, decodedTimeline)
+			if len(cohortData) == targetEliteCount {
+				break
+			}
+			if index == len(candidates)-1 && len(candidates) < candidateLimit {
+				break
+			}
+		}
+		if newCandidates == 0 || len(candidates) < candidateLimit {
 			break
 		}
 	}
 	if len(cohortData) == 0 {
-		s.updateJob(jobID, ReportJobFailed, "cohort", "Failed to collect any cohort members.", ReportJobProgress{Current: len(candidates), Total: len(candidates)}, "no cohort member data could be fetched", nil)
+		s.updateJob(jobID, ReportJobFailed, "cohort", "Failed to collect any cohort members.", ReportJobProgress{Current: 0, Total: targetEliteCount}, "no cohort member data could be fetched", nil)
 		return
 	}
 	s.setTimeline(jobID, &reportTimelineData{
@@ -797,7 +826,7 @@ func (s *ReportService) fetchPlayerData(ctx context.Context, req GenerateReportR
 	)
 }
 
-func (s *ReportService) fetchRankingCandidates(ctx context.Context, req GenerateReportRequest) ([]RankingCandidate, error) {
+func (s *ReportService) fetchRankingCandidates(ctx context.Context, req GenerateReportRequest, limit int) ([]RankingCandidate, error) {
 	var candidates []RankingCandidate
 	err := s.postForJSON(
 		ctx,
@@ -807,12 +836,16 @@ func (s *ReportService) fetchRankingCandidates(ctx context.Context, req Generate
 			Fight:          req.Fight,
 			CharacterClass: req.Character.Class,
 			CharacterSpec:  req.Character.Spec,
-			Limit:          rankingCandidateCap,
+			Limit:          limit,
 		},
 		&candidates,
 		"log-service",
 	)
 	return candidates, err
+}
+
+func rankingCandidateKey(candidate RankingCandidate) string {
+	return fmt.Sprintf("%s:%d:%s:%s", candidate.ReportID, candidate.FightID, candidate.Name, candidate.Server)
 }
 
 func (s *ReportService) fetchCohortMember(ctx context.Context, candidate RankingCandidate) (json.RawMessage, error) {
@@ -906,9 +939,10 @@ func buildInsightRequest(req GenerateReportRequest, comparison ComparisonResult,
 			FightDurationSec: req.Fight.KillTime,
 			CohortSize:       comparison.CohortStats.SampleSize,
 		},
-		Metrics:           nil,
-		AbilityHighlights: buildAbilityHighlights(comparison.AbilityUsage, 5, req.Character.Class, req.Character.Spec, playerData, eliteData),
-		BuffHighlights:    buildBuffHighlights(comparison.BuffUptimes, 5, req.Character.Class, req.Character.Spec, playerData, eliteData),
+		Metrics:            nil,
+		AbilityHighlights:  buildAbilityHighlights(comparison.AbilityUsage, 5, req.Character.Class, req.Character.Spec, playerData, eliteData),
+		BuffHighlights:     buildBuffHighlights(comparison.BuffUptimes, 5, req.Character.Class, req.Character.Spec, playerData, eliteData),
+		ResourceHighlights: buildResourceHighlights(comparison.ResourceUsage, 3),
 	}
 }
 
@@ -999,9 +1033,59 @@ func buildResourceTimelineSeries(data timelineFightData, resourceTypeID int, lab
 		Label:        label,
 		Subtitle:     subtitle,
 		ReportURL:    reportURL,
+		DurationMS:   data.FightEnd.Sub(data.FightStart).Milliseconds(),
 		Samples:      samples,
 		WasteMarkers: wasteMarkers,
 	}
+}
+
+func buildResourceHighlights(values []ResourceUsageComparison, limit int) []insightHighlight {
+	if len(values) == 0 || limit <= 0 {
+		return nil
+	}
+
+	ordered := append([]ResourceUsageComparison(nil), values...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		leftConcern := ordered[i].TimeAtMaxDeltaSeconds + maxFloat64(0, -ordered[i].SpentDelta/10)
+		rightConcern := ordered[j].TimeAtMaxDeltaSeconds + maxFloat64(0, -ordered[j].SpentDelta/10)
+		if leftConcern == rightConcern {
+			return ordered[i].ResourceType < ordered[j].ResourceType
+		}
+		return leftConcern > rightConcern
+	})
+
+	highlights := make([]insightHighlight, 0, limit)
+	for _, value := range ordered {
+		if value.PlayerAveragePct == 0 && value.CohortMedianAveragePct == 0 && value.PlayerSpent == 0 && value.CohortMedianSpent == 0 {
+			continue
+		}
+		highlights = append(highlights, insightHighlight{
+			Name:                value.ResourceType,
+			PlayerValue:         value.PlayerAveragePct,
+			EliteValue:          value.CohortMedianAveragePct,
+			Difference:          value.AveragePctDelta,
+			Unit:                "%",
+			PlayerRawCount:      value.PlayerSpent,
+			EliteRawCount:       value.CohortMedianSpent,
+			PlayerTimingSeconds: value.PlayerTimeAtMaxSeconds,
+			EliteTimingSeconds:  value.CohortMedianTimeAtMaxSeconds,
+			TimingDeltaSeconds:  value.TimeAtMaxDeltaSeconds,
+			TimingLabel:         "time at max",
+			Category:            "resource",
+		})
+		if len(highlights) == limit {
+			break
+		}
+	}
+
+	return highlights
+}
+
+func maxFloat64(left, right float64) float64 {
+	if left > right {
+		return left
+	}
+	return right
 }
 
 func findResourceType(data timelineFightData, resourceTypeID int) string {

@@ -10,6 +10,9 @@ import (
 type resourceUsageSummary struct {
 	ResourceTypeID     int
 	ResourceType       string
+	AveragePct         float64
+	TimeAtMaxSeconds   float64
+	Spent              float64
 	GeneratedPerMinute float64
 	WastePerMinute     float64
 	WastePct           float64
@@ -39,6 +42,9 @@ func (s *AnalysisService) CalculateResourceUsageComparisons(playerData types.Pla
 		generatedValues := make([]float64, 0, len(cohortSummaries))
 		wasteValues := make([]float64, 0, len(cohortSummaries))
 		wastePctValues := make([]float64, 0, len(cohortSummaries))
+		averagePctValues := make([]float64, 0, len(cohortSummaries))
+		timeAtMaxValues := make([]float64, 0, len(cohortSummaries))
+		spentValues := make([]float64, 0, len(cohortSummaries))
 
 		for _, summaryMap := range cohortSummaries {
 			summary, ok := summaryMap[resourceTypeID]
@@ -46,17 +52,26 @@ func (s *AnalysisService) CalculateResourceUsageComparisons(playerData types.Pla
 				generatedValues = append(generatedValues, 0)
 				wasteValues = append(wasteValues, 0)
 				wastePctValues = append(wastePctValues, 0)
+				averagePctValues = append(averagePctValues, 0)
+				timeAtMaxValues = append(timeAtMaxValues, 0)
+				spentValues = append(spentValues, 0)
 				continue
 			}
 			generatedValues = append(generatedValues, summary.GeneratedPerMinute)
 			wasteValues = append(wasteValues, summary.WastePerMinute)
 			wastePctValues = append(wastePctValues, summary.WastePct)
+			averagePctValues = append(averagePctValues, summary.AveragePct)
+			timeAtMaxValues = append(timeAtMaxValues, summary.TimeAtMaxSeconds)
+			spentValues = append(spentValues, summary.Spent)
 		}
 
 		player := playerSummary[resourceTypeID]
 		cohortGenerated := calculateMedianCopy(generatedValues)
 		cohortWaste := calculateMedianCopy(wasteValues)
 		cohortWastePct := calculateMedianCopy(wastePctValues)
+		cohortAveragePct := calculateMedianCopy(averagePctValues)
+		cohortTimeAtMax := calculateMedianCopy(timeAtMaxValues)
+		cohortSpent := calculateMedianCopy(spentValues)
 
 		var caution string
 		if len(generatedValues) < 5 {
@@ -72,6 +87,15 @@ func (s *AnalysisService) CalculateResourceUsageComparisons(playerData types.Pla
 		comparisons = append(comparisons, types.ResourceUsageComparison{
 			ResourceTypeID:                 resourceTypeID,
 			ResourceType:                   resourceType,
+			PlayerAveragePct:               round2(player.AveragePct),
+			CohortMedianAveragePct:         round2(cohortAveragePct),
+			AveragePctDelta:                round2(player.AveragePct - cohortAveragePct),
+			PlayerTimeAtMaxSeconds:         round2(player.TimeAtMaxSeconds),
+			CohortMedianTimeAtMaxSeconds:   round2(cohortTimeAtMax),
+			TimeAtMaxDeltaSeconds:          round2(player.TimeAtMaxSeconds - cohortTimeAtMax),
+			PlayerSpent:                    round2(player.Spent),
+			CohortMedianSpent:              round2(cohortSpent),
+			SpentDelta:                     round2(player.Spent - cohortSpent),
 			PlayerGeneratedPerMinute:       round2(player.GeneratedPerMinute),
 			CohortMedianGeneratedPerMinute: round2(cohortGenerated),
 			GeneratedDelta:                 round2(player.GeneratedPerMinute - cohortGenerated),
@@ -87,13 +111,13 @@ func (s *AnalysisService) CalculateResourceUsageComparisons(playerData types.Pla
 	}
 
 	sort.Slice(comparisons, func(i, j int) bool {
-		if comparisons[i].CohortMedianGeneratedPerMinute == comparisons[j].CohortMedianGeneratedPerMinute {
+		if comparisons[i].ResourceTypeID == comparisons[j].ResourceTypeID {
 			return comparisons[i].ResourceType < comparisons[j].ResourceType
 		}
-		return comparisons[i].CohortMedianGeneratedPerMinute > comparisons[j].CohortMedianGeneratedPerMinute
+		return comparisons[i].ResourceTypeID < comparisons[j].ResourceTypeID
 	})
 
-	return filterTopResourceComparisons(comparisons, 10)
+	return comparisons
 }
 
 func summarizeResourceUsage(data types.PlayerFightData, strategy resourceStrategy) map[int]resourceUsageSummary {
@@ -103,17 +127,19 @@ func summarizeResourceUsage(data types.PlayerFightData, strategy resourceStrateg
 	}
 
 	type aggregate struct {
-		name      string
-		generated float64
-		waste     float64
+		name             string
+		generated        float64
+		waste            float64
+		spent            float64
+		weightedPctTotal float64
+		timeAtMaxSeconds float64
+		observedSeconds  float64
+		samples          []types.ResourceEvent
 	}
 
 	aggregates := make(map[int]*aggregate)
 	for _, event := range data.ResourceEvents {
 		if event.ResourceTypeID == 0 && event.ResourceType == "" {
-			continue
-		}
-		if len(strategy.resourceIDs) > 0 && !strategy.resourceIDs[event.ResourceTypeID] {
 			continue
 		}
 
@@ -128,13 +154,49 @@ func summarizeResourceUsage(data types.PlayerFightData, strategy resourceStrateg
 		if event.Change > 0 {
 			entry.generated += event.Change
 		}
+		if event.Change < 0 {
+			entry.spent += -event.Change
+		}
 		if event.Waste > 0 {
 			entry.waste += event.Waste
 		}
+		entry.samples = append(entry.samples, event)
 	}
 
 	summaries := make(map[int]resourceUsageSummary, len(aggregates))
 	for resourceTypeID, entry := range aggregates {
+		sort.Slice(entry.samples, func(i, j int) bool {
+			return entry.samples[i].Timestamp.Before(entry.samples[j].Timestamp)
+		})
+		for index, sample := range entry.samples {
+			nextTimestamp := data.FightEnd
+			if index+1 < len(entry.samples) {
+				nextTimestamp = entry.samples[index+1].Timestamp
+			}
+			seconds := nextTimestamp.Sub(sample.Timestamp).Seconds()
+			if seconds <= 0 {
+				continue
+			}
+			if sample.MaxAmount > 0 {
+				pct := (sample.Amount / sample.MaxAmount) * 100
+				if pct < 0 {
+					pct = 0
+				}
+				if pct > 100 {
+					pct = 100
+				}
+				entry.weightedPctTotal += pct * seconds
+				entry.observedSeconds += seconds
+				if sample.Amount >= sample.MaxAmount {
+					entry.timeAtMaxSeconds += seconds
+				}
+			}
+		}
+
+		averagePct := 0.0
+		if entry.observedSeconds > 0 {
+			averagePct = entry.weightedPctTotal / entry.observedSeconds
+		}
 		wastePct := 0.0
 		if entry.generated > 0 {
 			wastePct = (entry.waste / entry.generated) * 100
@@ -142,6 +204,9 @@ func summarizeResourceUsage(data types.PlayerFightData, strategy resourceStrateg
 		summaries[resourceTypeID] = resourceUsageSummary{
 			ResourceTypeID:     resourceTypeID,
 			ResourceType:       entry.name,
+			AveragePct:         averagePct,
+			TimeAtMaxSeconds:   entry.timeAtMaxSeconds,
+			Spent:              entry.spent,
 			GeneratedPerMinute: entry.generated / durationMinutes,
 			WastePerMinute:     entry.waste / durationMinutes,
 			WastePct:           wastePct,

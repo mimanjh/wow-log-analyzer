@@ -1,10 +1,11 @@
 package types
 
 type InsightGenerationRequest struct {
-	Context           InsightContext     `json:"context"`
-	Metrics           []InsightMetric    `json:"metrics,omitempty"`
-	AbilityHighlights []InsightHighlight `json:"abilityHighlights,omitempty"`
-	BuffHighlights    []InsightHighlight `json:"buffHighlights,omitempty"`
+	Context            InsightContext     `json:"context"`
+	Metrics            []InsightMetric    `json:"metrics,omitempty"`
+	AbilityHighlights  []InsightHighlight `json:"abilityHighlights,omitempty"`
+	BuffHighlights     []InsightHighlight `json:"buffHighlights,omitempty"`
+	ResourceHighlights []InsightHighlight `json:"resourceHighlights,omitempty"`
 }
 
 type InsightContext struct {

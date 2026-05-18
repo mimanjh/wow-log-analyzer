@@ -64,7 +64,7 @@ func validateInsightRequest(req types.InsightGenerationRequest) error {
 	if req.Context.CohortSize <= 0 {
 		return errors.New("context.cohortSize must be greater than zero")
 	}
-	if len(req.Metrics) == 0 && len(req.AbilityHighlights) == 0 && len(req.BuffHighlights) == 0 {
+	if len(req.Metrics) == 0 && len(req.AbilityHighlights) == 0 && len(req.BuffHighlights) == 0 && len(req.ResourceHighlights) == 0 {
 		return errors.New("at least one metric or highlight is required")
 	}
 
@@ -85,12 +85,13 @@ func validateInsightRequest(req types.InsightGenerationRequest) error {
 		}
 	}
 
-	for _, highlight := range append(append([]types.InsightHighlight(nil), req.AbilityHighlights...), req.BuffHighlights...) {
+	allHighlights := append(append(append([]types.InsightHighlight(nil), req.AbilityHighlights...), req.BuffHighlights...), req.ResourceHighlights...)
+	for _, highlight := range allHighlights {
 		if strings.TrimSpace(highlight.Name) == "" {
 			return errors.New("highlight name is required")
 		}
-		if highlight.Category != "" && highlight.Category != "offensive" && highlight.Category != "defensive" {
-			return fmt.Errorf("highlight %s category must be offensive or defensive when provided", highlight.Name)
+		if highlight.Category != "" && highlight.Category != "offensive" && highlight.Category != "defensive" && highlight.Category != "resource" {
+			return fmt.Errorf("highlight %s category must be offensive, defensive, or resource when provided", highlight.Name)
 		}
 	}
 
@@ -114,7 +115,7 @@ type rankedHighlight struct {
 }
 
 func formatFallbackInsights(req types.InsightGenerationRequest) types.InsightGenerationResponse {
-	if len(req.AbilityHighlights) > 0 || len(req.BuffHighlights) > 0 {
+	if len(req.AbilityHighlights) > 0 || len(req.BuffHighlights) > 0 || len(req.ResourceHighlights) > 0 {
 		return formatTimelineDrivenFallback(req)
 	}
 
@@ -215,6 +216,9 @@ func rankHighlights(req types.InsightGenerationRequest) []rankedHighlight {
 	for _, highlight := range req.BuffHighlights {
 		ranked = append(ranked, buildRankedHighlight(highlight, "buff"))
 	}
+	for _, highlight := range req.ResourceHighlights {
+		ranked = append(ranked, buildRankedHighlight(highlight, "resource"))
+	}
 
 	sort.Slice(ranked, func(i, j int) bool {
 		if ranked[i].concernScore == ranked[j].concernScore {
@@ -233,6 +237,9 @@ func buildRankedHighlight(highlight types.InsightHighlight, section string) rank
 	concern := 0.0
 	positive := 0.0
 	isConcern := highlight.Difference < 0
+	if section == "resource" {
+		isConcern = highlight.TimingDeltaSeconds > 0 || highlight.PlayerRawCount < highlight.EliteRawCount
+	}
 	timingWeight := math.Abs(highlight.TimingDeltaSeconds) / 10
 	if len(highlight.PlayerUseTimesSeconds) > 0 || len(highlight.EliteUseTimesSeconds) > 0 {
 		timingWeight += compareUseTimeSequences(highlight.PlayerUseTimesSeconds, highlight.EliteUseTimesSeconds) / 10
@@ -242,6 +249,9 @@ func buildRankedHighlight(highlight types.InsightHighlight, section string) rank
 	}
 	if isConcern {
 		concern = math.Abs(highlight.Difference) + timingWeight
+		if section == "resource" && highlight.PlayerRawCount < highlight.EliteRawCount {
+			concern += (highlight.EliteRawCount - highlight.PlayerRawCount) / 10
+		}
 	} else {
 		positive = math.Abs(highlight.Difference) + timingWeight
 	}
@@ -286,6 +296,8 @@ func buildHighlightInsight(item rankedHighlight) types.AIInsight {
 	sectionLabel := "Ability usage"
 	if item.section == "buff" {
 		sectionLabel = "Buff uptime"
+	} else if item.section == "resource" {
+		sectionLabel = "Resource usage"
 	}
 
 	deltaText := formatSigned(item.highlight.Difference, item.highlight.Unit)
@@ -358,6 +370,8 @@ func buildHighlightFocusRecommendation(context types.InsightContext, ranked []ra
 		area := "ability usage"
 		if item.section == "buff" {
 			area = "buff timing and uptime"
+		} else if item.section == "resource" {
+			area = "resource management"
 		}
 
 		return types.FocusRecommendation{
@@ -511,6 +525,10 @@ func buildPrompt(req types.InsightGenerationRequest) string {
 	for _, highlight := range req.BuffHighlights {
 		buffLines = append(buffLines, formatBuffHighlightLine(highlight))
 	}
+	var resourceLines []string
+	for _, highlight := range req.ResourceHighlights {
+		resourceLines = append(resourceLines, formatResourceHighlightLine(highlight))
+	}
 
 	sections := []string{
 		fmt.Sprintf(
@@ -534,11 +552,28 @@ func buildPrompt(req types.InsightGenerationRequest) string {
 	if len(buffLines) > 0 {
 		sections = append(sections, "Top buff uptime comparisons:\n"+strings.Join(buffLines, "\n"))
 	}
+	if len(resourceLines) > 0 {
+		sections = append(sections, "Top resource comparisons:\n"+strings.Join(resourceLines, "\n"))
+	}
 	if len(metricLines) > 0 {
 		sections = append(sections, "Legacy metric context:\n"+strings.Join(metricLines, "\n"))
 	}
 
 	return strings.Join(sections, "\n\n")
+}
+
+func formatResourceHighlightLine(highlight types.InsightHighlight) string {
+	return fmt.Sprintf(
+		"- %s: average player=%s, elite=%s, delta=%s, spent player=%s, elite=%s, time at max player=%s, elite=%s",
+		highlight.Name,
+		formatValue(highlight.PlayerValue, highlight.Unit),
+		formatValue(highlight.EliteValue, highlight.Unit),
+		formatSigned(highlight.Difference, highlight.Unit),
+		formatValue(highlight.PlayerRawCount, ""),
+		formatValue(highlight.EliteRawCount, ""),
+		formatValue(highlight.PlayerTimingSeconds, "s"),
+		formatValue(highlight.EliteTimingSeconds, "s"),
+	)
 }
 
 func formatAbilityHighlightLine(highlight types.InsightHighlight) string {

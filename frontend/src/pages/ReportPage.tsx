@@ -1011,6 +1011,7 @@ function ResourceTimelineRow({
     durationMs: number;
     toneClass: string;
 }) {
+    const rowDurationMs = series.durationMs || durationMs;
     const maxValue = Math.max(
         1,
         ...series.samples.map((sample) => sample.maxValue || sample.value || 0),
@@ -1019,7 +1020,7 @@ function ResourceTimelineRow({
         .map((sample) => {
             const x = Math.min(
                 100,
-                Math.max(0, (sample.timestampMs / durationMs) * 100),
+                Math.max(0, (sample.timestampMs / rowDurationMs) * 100),
             );
             const y = 100 - Math.min(100, Math.max(0, (sample.value / maxValue) * 100));
             return `${x},${y}`;
@@ -1072,12 +1073,12 @@ function ResourceTimelineRow({
                     {(series.wasteMarkersMs ?? []).map((markerMs, index) => {
                         const left = Math.min(
                             100,
-                            Math.max(0, (markerMs / durationMs) * 100),
+                            Math.max(0, (markerMs / rowDurationMs) * 100),
                         );
                         return (
                             <div
                                 key={`${series.label}-waste-${markerMs}-${index}`}
-                                className="absolute inset-y-0 w-0.5 bg-rose-500/80"
+                                className="absolute inset-y-0 w-[1.5%] -translate-x-1/2 rounded-sm bg-rose-500/50"
                                 style={{ left: `${left}%` }}
                                 title={`Waste/full marker at ${formatTimelineTimestamp(markerMs)}`}
                             />
@@ -1086,7 +1087,7 @@ function ResourceTimelineRow({
                 </div>
                 <div className="mt-2 flex justify-between text-xs text-slate-500">
                     <span>0:00</span>
-                    <span>{formatTimelineTimestamp(durationMs)}</span>
+                    <span>{formatTimelineTimestamp(rowDurationMs)}</span>
                 </div>
             </div>
         </div>
@@ -1353,7 +1354,7 @@ export function ReportPage() {
             .includes(resourceSearch.trim().toLowerCase());
         return (
             searchMatches &&
-            matchesFilter(entry.wastePctDelta * -1, resourceFilter)
+            matchesFilter(entry.timeAtMaxDeltaSeconds * -1, resourceFilter)
         );
     });
     const orderedAbilityUsage = sortByTrackedPriority(
@@ -1367,15 +1368,11 @@ export function ReportPage() {
     const orderedResourceUsage = [...filteredResourceUsage].sort(
         (left, right) => {
             if (
-                left.cohortMedianGeneratedPerMinute ===
-                right.cohortMedianGeneratedPerMinute
+                left.timeAtMaxDeltaSeconds === right.timeAtMaxDeltaSeconds
             ) {
                 return left.resourceType.localeCompare(right.resourceType);
             }
-            return (
-                right.cohortMedianGeneratedPerMinute -
-                left.cohortMedianGeneratedPerMinute
-            );
+            return right.timeAtMaxDeltaSeconds - left.timeAtMaxDeltaSeconds;
         },
     );
     const visibleAbilityUsage = showAllAbilities
@@ -1911,8 +1908,8 @@ export function ReportPage() {
                     <div className="rounded-3xl border border-slate-800 bg-slate-950/80 p-6">
                         <div className="mb-6 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                             <p className="text-xs text-slate-400">
-                                * spec-relevant resource generation and waste
-                                are normalized by fight length
+                                * resource comparisons show average bar level,
+                                capped time, and total spent versus elite medians
                             </p>
                             <div className="flex flex-col gap-3 md:flex-row">
                                 <input
@@ -1936,10 +1933,10 @@ export function ReportPage() {
                                 >
                                     <option value="all">All resources</option>
                                     <option value="behind">
-                                        Higher waste than elites
+                                        More capped time than elites
                                     </option>
                                     <option value="ahead">
-                                        Lower waste than elites
+                                        Less capped time than elites
                                     </option>
                                 </select>
                             </div>
@@ -1953,16 +1950,16 @@ export function ReportPage() {
                                                 Resource
                                             </th>
                                             <th className="pb-3 pr-4 font-medium">
-                                                You Gen
+                                                Avg Level
                                             </th>
                                             <th className="pb-3 pr-4 font-medium">
-                                                Elite Gen
+                                                Time Capped
                                             </th>
                                             <th className="pb-3 pr-4 font-medium">
-                                                Waste
+                                                Spent
                                             </th>
                                             <th className="pb-3 pr-4 font-medium">
-                                                Waste %
+                                                Notes
                                             </th>
                                         </tr>
                                     </thead>
@@ -1988,66 +1985,58 @@ export function ReportPage() {
                                                 </td>
                                                 <td className="py-4 pr-4 text-slate-200">
                                                     <p>
-                                                        {entry.playerGeneratedPerMinute.toFixed(
-                                                            2,
-                                                        )}
-                                                    </p>
-                                                    <p className="mt-1 text-xs text-slate-500">
-                                                        {formatSigned(
-                                                            entry.generatedDelta,
-                                                            "",
-                                                            2,
-                                                        )}{" "}
-                                                        vs elite
-                                                    </p>
-                                                </td>
-                                                <td className="py-4 pr-4 text-slate-300">
-                                                    <p>
-                                                        {entry.cohortMedianGeneratedPerMinute.toFixed(
-                                                            2,
-                                                        )}
-                                                    </p>
-                                                </td>
-                                                <td className="py-4 pr-4">
-                                                    <p className="text-slate-200">
-                                                        {entry.playerWastePerMinute.toFixed(
-                                                            2,
-                                                        )}
-                                                    </p>
-                                                    <p
-                                                        className={
-                                                            entry.wasteDelta <=
-                                                            0
-                                                                ? "mt-1 text-xs text-emerald-400"
-                                                                : "mt-1 text-xs text-rose-400"
-                                                        }
-                                                    >
-                                                        {formatSigned(
-                                                            entry.wasteDelta,
-                                                            "",
-                                                            2,
-                                                        )}{" "}
-                                                        vs elite
-                                                    </p>
-                                                </td>
-                                                <td className="py-4 pr-4">
-                                                    <p className="text-slate-200">
-                                                        {entry.playerWastePct.toFixed(
+                                                        {entry.playerAveragePct.toFixed(
                                                             1,
                                                         )}
                                                         %
                                                     </p>
+                                                    <p className="mt-1 text-xs text-slate-500">
+                                                        {formatSigned(
+                                                            entry.averagePctDelta,
+                                                            "%",
+                                                            1,
+                                                        )}{" "}
+                                                        vs elite
+                                                    </p>
+                                                </td>
+                                                <td className="py-4 pr-4">
+                                                    <p className="text-slate-200">
+                                                        {entry.playerTimeAtMaxSeconds.toFixed(
+                                                            1,
+                                                        )}
+                                                        s
+                                                    </p>
                                                     <p
                                                         className={
-                                                            entry.wastePctDelta <=
+                                                            entry.timeAtMaxDeltaSeconds <=
                                                             0
                                                                 ? "mt-1 text-xs text-emerald-400"
                                                                 : "mt-1 text-xs text-rose-400"
                                                         }
                                                     >
                                                         {formatSigned(
-                                                            entry.wastePctDelta,
-                                                            "%",
+                                                            entry.timeAtMaxDeltaSeconds,
+                                                            "s",
+                                                            1,
+                                                        )}{" "}
+                                                        vs elite
+                                                    </p>
+                                                </td>
+                                                <td className="py-4 pr-4">
+                                                    <p className="text-slate-200">
+                                                        {entry.playerSpent.toFixed(1)}
+                                                    </p>
+                                                    <p
+                                                        className={
+                                                            entry.spentDelta >=
+                                                            0
+                                                                ? "mt-1 text-xs text-emerald-400"
+                                                                : "mt-1 text-xs text-rose-400"
+                                                        }
+                                                    >
+                                                        {formatSigned(
+                                                            entry.spentDelta,
+                                                            "",
                                                             1,
                                                         )}{" "}
                                                         vs elite

@@ -113,6 +113,15 @@ type BuffUptimeComparison struct {
 type ResourceUsageComparison struct {
 	ResourceTypeID                 int     `json:"resourceTypeId"`
 	ResourceType                   string  `json:"resourceType"`
+	PlayerAveragePct               float64 `json:"playerAveragePct"`
+	CohortMedianAveragePct         float64 `json:"cohortMedianAveragePct"`
+	AveragePctDelta                float64 `json:"averagePctDelta"`
+	PlayerTimeAtMaxSeconds         float64 `json:"playerTimeAtMaxSeconds"`
+	CohortMedianTimeAtMaxSeconds   float64 `json:"cohortMedianTimeAtMaxSeconds"`
+	TimeAtMaxDeltaSeconds          float64 `json:"timeAtMaxDeltaSeconds"`
+	PlayerSpent                    float64 `json:"playerSpent"`
+	CohortMedianSpent              float64 `json:"cohortMedianSpent"`
+	SpentDelta                     float64 `json:"spentDelta"`
 	PlayerGeneratedPerMinute       float64 `json:"playerGeneratedPerMinute"`
 	CohortMedianGeneratedPerMinute float64 `json:"cohortMedianGeneratedPerMinute"`
 	GeneratedDelta                 float64 `json:"generatedDelta"`
