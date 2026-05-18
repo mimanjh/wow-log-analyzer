@@ -183,8 +183,8 @@ func TestAnalyzeService_ProcessIntake(t *testing.T) {
 			t.Errorf("ProcessIntake() ReportID = %v, want %v", resp.ReportID, "abc123")
 		}
 
-		if len(resp.Fights) != 2 {
-			t.Errorf("ProcessIntake() expected 2 fights, got %d", len(resp.Fights))
+		if len(resp.Fights) != 3 {
+			t.Errorf("ProcessIntake() expected 3 fights, got %d", len(resp.Fights))
 		}
 
 		if len(resp.Characters) != 1 {
@@ -199,7 +199,10 @@ func TestAnalyzeService_ProcessIntake(t *testing.T) {
 			t.Errorf("ProcessIntake() expected preferred fight to be first, got %d", resp.Fights[0].ID)
 		}
 		if len(resp.Fights) > 1 && resp.Fights[1].ID != 1 {
-			t.Errorf("ProcessIntake() expected only successful raid fights to remain, got %#v", resp.Fights)
+			t.Errorf("ProcessIntake() expected non-preferred raid fights to remain, got %#v", resp.Fights)
+		}
+		if len(resp.Fights) > 2 && resp.Fights[2].ID != 4 {
+			t.Errorf("ProcessIntake() expected valid wipe fights to remain, got %#v", resp.Fights)
 		}
 	})
 

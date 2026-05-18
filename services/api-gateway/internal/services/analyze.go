@@ -310,9 +310,6 @@ func filterRelevantFights(fights []FightSummary) []FightSummary {
 		if fight.EncounterID == 0 {
 			continue
 		}
-		if !fight.Kill {
-			continue
-		}
 		if strings.EqualFold(strings.TrimSpace(fight.Difficulty), "Unknown") {
 			continue
 		}
