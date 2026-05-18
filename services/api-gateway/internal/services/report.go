@@ -26,6 +26,7 @@ type GenerateReportResponse struct {
 	Character  CharacterSummary `json:"character"`
 	Cohort     []CohortEntry    `json:"cohort"`
 	Comparison ComparisonResult `json:"comparison"`
+	Warnings   []ReportWarning  `json:"warnings,omitempty"`
 	AI         AIReportSection  `json:"ai"`
 }
 
@@ -79,6 +80,12 @@ type CohortEntry struct {
 	RankValue    float64 `json:"rankValue"`
 	DurationMS   int     `json:"durationMs"`
 	ReportURL    string  `json:"reportUrl"`
+}
+
+type ReportWarning struct {
+	Kind    string `json:"kind"`
+	Title   string `json:"title"`
+	Message string `json:"message"`
 }
 
 type AIReportSection struct {
@@ -396,15 +403,17 @@ type reportTimelineData struct {
 }
 
 type timelineFightData struct {
-	PlayerID       int                     `json:"playerId"`
-	FightID        int                     `json:"fightId"`
-	FightStart     time.Time               `json:"fightStart"`
-	FightEnd       time.Time               `json:"fightEnd"`
-	CastEvents     []timelineAbilityEvent  `json:"castEvents"`
-	DamageEvents   []timelineAbilityEvent  `json:"damageEvents"`
-	CooldownEvents []timelineAbilityEvent  `json:"cooldownEvents"`
-	BuffEvents     []timelineBuffEvent     `json:"buffEvents"`
-	ResourceEvents []timelineResourceEvent `json:"resourceEvents"`
+	PlayerID            int                     `json:"playerId"`
+	FightID             int                     `json:"fightId"`
+	FightStart          time.Time               `json:"fightStart"`
+	FightEnd            time.Time               `json:"fightEnd"`
+	TalentImportCode    string                  `json:"talentImportCode,omitempty"`
+	TalentCalculatorURL string                  `json:"talentCalculatorUrl,omitempty"`
+	CastEvents          []timelineAbilityEvent  `json:"castEvents"`
+	DamageEvents        []timelineAbilityEvent  `json:"damageEvents"`
+	CooldownEvents      []timelineAbilityEvent  `json:"cooldownEvents"`
+	BuffEvents          []timelineBuffEvent     `json:"buffEvents"`
+	ResourceEvents      []timelineResourceEvent `json:"resourceEvents"`
 }
 
 type timelineAbilityEvent struct {
@@ -729,6 +738,7 @@ func (s *ReportService) runJob(jobID string, req GenerateReportRequest) {
 		Character:  req.Character,
 		Cohort:     cohortEntries,
 		Comparison: comparison,
+		Warnings:   buildReportWarnings(req, playerTimelineData, cohortTimelineData),
 		AI: AIReportSection{
 			Available: false,
 			Insights:  []AIInsight{},
@@ -775,6 +785,76 @@ func buildCohortEntry(candidate RankingCandidate) CohortEntry {
 			candidate.FightID,
 		),
 	}
+}
+
+func buildReportWarnings(req GenerateReportRequest, playerData timelineFightData, cohortData []timelineFightData) []ReportWarning {
+	warnings := make([]ReportWarning, 0, 1)
+
+	playerTalentCode := strings.TrimSpace(req.Character.TalentImportCode)
+	if playerTalentCode == "" {
+		playerTalentCode = strings.TrimSpace(playerData.TalentImportCode)
+	}
+	if playerTalentCode == "" || len(cohortData) == 0 {
+		return warnings
+	}
+
+	known := 0
+	different := 0
+	cohortTalentCounts := make(map[string]int)
+	for _, cohort := range cohortData {
+		cohortTalentCode := strings.TrimSpace(cohort.TalentImportCode)
+		if cohortTalentCode == "" {
+			continue
+		}
+		known++
+		cohortTalentCounts[cohortTalentCode]++
+		if cohortTalentCode != playerTalentCode {
+			different++
+		}
+	}
+
+	if known < 3 {
+		return warnings
+	}
+
+	topEliteCount := 0
+	for _, count := range cohortTalentCounts {
+		if count > topEliteCount {
+			topEliteCount = count
+		}
+	}
+
+	if topEliteCount <= known/2 {
+		warnings = append(warnings, ReportWarning{
+			Kind:  "talents",
+			Title: "Elite talent builds vary",
+			Message: fmt.Sprintf(
+				"The %d elite %s %s parses with available talent data did not share a clear majority talent build. Consider reviewing the talents of the elites before comparing rotation metrics.",
+				known,
+				req.Character.Spec,
+				req.Character.Class,
+			),
+		})
+		return warnings
+	}
+
+	if different <= known/2 {
+		return warnings
+	}
+
+	warnings = append(warnings, ReportWarning{
+		Kind:  "talents",
+		Title: "Talent build differs from most elites",
+		Message: fmt.Sprintf(
+			"%d of %d elite %s %s parses with available talent data used the same talent build, and your selected player's talent build was different. Consider reviewing the talents of the elites before comparing rotation metrics.",
+			topEliteCount,
+			known,
+			req.Character.Spec,
+			req.Character.Class,
+		),
+	})
+
+	return warnings
 }
 
 func (s *ReportService) setJob(job ReportJob) {

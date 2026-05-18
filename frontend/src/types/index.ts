@@ -120,7 +120,14 @@ export interface ReportResult {
   character: Character
   cohort: CohortEntry[]
   comparison: ComparisonResult
+  warnings?: ReportWarning[]
   ai: AISection
+}
+
+export interface ReportWarning {
+  kind: string
+  title: string
+  message: string
 }
 
 export interface CohortEntry {

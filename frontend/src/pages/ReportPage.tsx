@@ -1337,6 +1337,9 @@ export function ReportPage() {
     const [resourceTimelineError, setResourceTimelineError] = useState<
         string | null
     >(null);
+    const [dismissedWarnings, setDismissedWarnings] = useState<
+        Record<string, boolean>
+    >({});
     const reportJobId = reportJob?.jobId;
     const reportJobStatus = reportJob?.status;
 
@@ -1398,6 +1401,7 @@ export function ReportPage() {
         setResourceTimelineCache({});
         setResourceTimelineLoading(false);
         setResourceTimelineError(null);
+        setDismissedWarnings({});
     }, [reportJobId]);
 
     if (!reportJob && !reportResult) {
@@ -1439,7 +1443,12 @@ export function ReportPage() {
         );
     }
 
-    const { fight, character, comparison, ai } = reportResult!;
+    const { fight, character, comparison, warnings = [], ai } = reportResult!;
+    const visibleWarnings = warnings.filter(
+        (warning) => !dismissedWarnings[`${warning.kind}-${warning.title}`],
+    );
+    const showAIWarning =
+        Boolean(ai.warning) && !dismissedWarnings["ai-warning"];
     const { cohortStats } = comparison;
     const specKey = `${character.spec} ${character.class}`;
     const trackedPriority = trackedSpecPriorities[specKey] ?? {
@@ -1658,8 +1667,51 @@ export function ReportPage() {
                     ])}
                 </div>
 
-                {ai.warning && (
-                    <div className="rounded-3xl border border-amber-700/60 bg-amber-950/20 p-6">
+                {visibleWarnings.map((warning) => {
+                    const warningKey = `${warning.kind}-${warning.title}`;
+                    return (
+                        <div
+                            key={warningKey}
+                            className="relative rounded-3xl border border-amber-700/60 bg-amber-950/20 p-6 pr-14"
+                        >
+                            <button
+                                type="button"
+                                aria-label="Dismiss warning"
+                                className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-full border border-amber-700/60 text-amber-200 transition hover:border-amber-400 hover:text-white"
+                                onClick={() =>
+                                    setDismissedWarnings((current) => ({
+                                        ...current,
+                                        [warningKey]: true,
+                                    }))
+                                }
+                            >
+                                x
+                            </button>
+                            <h2 className="text-lg font-semibold text-amber-100">
+                                {warning.title}
+                            </h2>
+                            <p className="mt-2 text-sm text-amber-300">
+                                {warning.message}
+                            </p>
+                        </div>
+                    );
+                })}
+
+                {showAIWarning && ai.warning && (
+                    <div className="relative rounded-3xl border border-amber-700/60 bg-amber-950/20 p-6 pr-14">
+                        <button
+                            type="button"
+                            aria-label="Dismiss warning"
+                            className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-full border border-amber-700/60 text-amber-200 transition hover:border-amber-400 hover:text-white"
+                            onClick={() =>
+                                setDismissedWarnings((current) => ({
+                                    ...current,
+                                    "ai-warning": true,
+                                }))
+                            }
+                        >
+                            x
+                        </button>
                         <p className="text-sm text-amber-300">{ai.warning}</p>
                     </div>
                 )}

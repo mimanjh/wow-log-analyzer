@@ -829,7 +829,14 @@ func (c *WCLHTTPClient) fetchRankedPlayerFightData(ranking WCLRankingEntry) (typ
 		return types.PlayerFightData{}, fmt.Errorf("actor match not found for %s in report %s", ranking.Name, ranking.Report.Code)
 	}
 
-	return c.fetchPlayerFightData(ranking.Report.Code, *fight, character.ID)
+	data, err := c.fetchPlayerFightData(ranking.Report.Code, *fight, character.ID)
+	if err != nil {
+		return types.PlayerFightData{}, err
+	}
+	data.TalentImportCode = character.TalentImportCode
+	data.TalentCalculatorURL = character.TalentCalculatorURL
+
+	return data, nil
 }
 
 func (c *WCLHTTPClient) getPlayerActors(reportID string) ([]WCLActor, error) {
