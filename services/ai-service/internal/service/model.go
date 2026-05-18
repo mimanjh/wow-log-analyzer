@@ -44,7 +44,14 @@ type openAIFormat struct {
 type openAIResponsesResponse struct {
 	Model      string `json:"model"`
 	OutputText string `json:"output_text"`
-	Error      *struct {
+	Output     []struct {
+		Type    string `json:"type"`
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+	} `json:"output"`
+	Error *struct {
 		Message string `json:"message"`
 	} `json:"error,omitempty"`
 }
@@ -128,18 +135,36 @@ func (c openAIModelClient) Generate(ctx context.Context, prompt string, _ types.
 	if response.Error != nil {
 		return nil, errors.New(response.Error.Message)
 	}
-	if strings.TrimSpace(response.OutputText) == "" {
+	outputText := responseText(response)
+	if strings.TrimSpace(outputText) == "" {
 		return nil, errors.New("openai response did not include output_text")
 	}
 
 	var parsed types.InsightGenerationResponse
-	if err := json.Unmarshal([]byte(response.OutputText), &parsed); err != nil {
+	if err := json.Unmarshal([]byte(outputText), &parsed); err != nil {
 		return nil, fmt.Errorf("failed to decode openai structured output: %w", err)
 	}
 	if response.Model != "" {
 		parsed.Model = response.Model
 	}
 	return &parsed, nil
+}
+
+func responseText(response openAIResponsesResponse) string {
+	if strings.TrimSpace(response.OutputText) != "" {
+		return response.OutputText
+	}
+
+	var parts []string
+	for _, output := range response.Output {
+		for _, content := range output.Content {
+			if strings.TrimSpace(content.Text) == "" {
+				continue
+			}
+			parts = append(parts, content.Text)
+		}
+	}
+	return strings.Join(parts, "")
 }
 
 func insightResponseSchema() map[string]any {

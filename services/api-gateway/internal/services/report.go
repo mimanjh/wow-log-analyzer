@@ -387,6 +387,7 @@ type insightGenerationResponse struct {
 	FocusRecommendation FocusRecommendation `json:"focusRecommendation"`
 	FallbackUsed        bool                `json:"fallbackUsed"`
 	Model               string              `json:"model"`
+	Warning             string              `json:"warning,omitempty"`
 }
 
 type ReportJobStatus string
@@ -849,7 +850,7 @@ func (s *ReportService) runJob(jobID string, req GenerateReportRequest) {
 		FocusRecommendation: insights.FocusRecommendation,
 	}
 	if insights.FallbackUsed {
-		response.AI.Warning = "AI used the deterministic fallback formatter for this report."
+		response.AI.Warning = firstNonEmpty(insights.Warning, "AI used the deterministic fallback formatter for this report.")
 	}
 
 	s.updateJob(jobID, ReportJobCompleted, "completed", "Report completed.", ReportJobProgress{Current: 5, Total: 5}, "", &response)

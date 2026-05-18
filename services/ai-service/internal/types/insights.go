@@ -55,6 +55,7 @@ type InsightGenerationResponse struct {
 	FocusRecommendation FocusRecommendation `json:"focusRecommendation"`
 	FallbackUsed        bool                `json:"fallbackUsed"`
 	Model               string              `json:"model"`
+	Warning             string              `json:"warning,omitempty"`
 }
 
 type AIInsight struct {

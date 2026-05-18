@@ -34,6 +34,7 @@ func (s *InsightService) GenerateInsights(ctx context.Context, req types.Insight
 	}
 
 	prompt := buildPrompt(req)
+	var modelErr error
 	if s.modelClient != nil {
 		response, err := s.modelClient.Generate(ctx, prompt, req)
 		if err == nil && response != nil {
@@ -44,6 +45,7 @@ func (s *InsightService) GenerateInsights(ctx context.Context, req types.Insight
 			return *response, nil
 		}
 		if err != nil {
+			modelErr = err
 			fmt.Printf("ai-service model generation failed: %v\n", err)
 		}
 	}
@@ -51,7 +53,20 @@ func (s *InsightService) GenerateInsights(ctx context.Context, req types.Insight
 	fallback := formatFallbackInsights(req)
 	fallback.FallbackUsed = true
 	fallback.Model = "deterministic-fallback"
+	if modelErr != nil {
+		fallback.Warning = "AI model request failed: " + summarizeModelError(modelErr)
+	} else {
+		fallback.Warning = "AI model provider is not configured."
+	}
 	return fallback, nil
+}
+
+func summarizeModelError(err error) string {
+	message := strings.Join(strings.Fields(err.Error()), " ")
+	if len(message) > 300 {
+		return message[:300] + "..."
+	}
+	return message
 }
 
 func validateInsightRequest(req types.InsightGenerationRequest) error {

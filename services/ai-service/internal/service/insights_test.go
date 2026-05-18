@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -137,5 +139,115 @@ func TestBuildPromptExcludesRawLogReferences(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "Use only these deterministic comparison outputs") {
 		t.Fatal("prompt should emphasize deterministic-only input")
+	}
+}
+
+func TestNewModelClientRequiresLiveOpenAIConfig(t *testing.T) {
+	disabled := newModelClient(config.Config{
+		Provider:         "openai",
+		Model:            "gpt-5-mini",
+		ModelAPIKey:      "test-key",
+		LiveModelEnabled: false,
+	})
+	if _, ok := disabled.(disabledModelClient); !ok {
+		t.Fatalf("expected disabled model client when live model is disabled")
+	}
+
+	enabled := newModelClient(config.Config{
+		Provider:         "openai",
+		Model:            "gpt-5-mini",
+		ModelAPIKey:      "test-key",
+		LiveModelEnabled: true,
+	})
+	if _, ok := enabled.(openAIModelClient); !ok {
+		t.Fatalf("expected OpenAI model client when provider, key, and live flag are set")
+	}
+}
+
+func TestResponseTextReadsResponsesOutputContent(t *testing.T) {
+	response := openAIResponsesResponse{
+		Output: []struct {
+			Type    string `json:"type"`
+			Content []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"content"`
+		}{
+			{
+				Type: "message",
+				Content: []struct {
+					Type string `json:"type"`
+					Text string `json:"text"`
+				}{
+					{Type: "output_text", Text: `{"insights":[]`},
+					{Type: "output_text", Text: `}`},
+				},
+			},
+		},
+	}
+
+	if got := responseText(response); got != `{"insights":[]}` {
+		t.Fatalf("expected concatenated output content, got %s", got)
+	}
+}
+
+func TestOpenAIModelClientGenerateParsesResponsesOutputContent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("expected POST request, got %s", r.Method)
+		}
+		if r.Header.Get("Authorization") != "Bearer test-key" {
+			t.Fatalf("expected bearer auth header")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"model":"gpt-5-mini",
+			"output":[
+				{
+					"type":"message",
+					"content":[
+						{
+							"type":"output_text",
+							"text":"{\"insights\":[{\"metricKey\":\"castsPerMin\",\"title\":\"Tighten casts\",\"summary\":\"Review the cast gap using deterministic comparisons only.\",\"confidence\":\"medium\"},{\"metricKey\":\"buff:uptime\",\"title\":\"Buff window\",\"summary\":\"Buff timing trailed the elite sample.\",\"confidence\":\"high\"},{\"metricKey\":\"resource:runes\",\"title\":\"Rune use\",\"summary\":\"Rune use was below the elite reference.\",\"confidence\":\"medium\"}],\"focusRecommendation\":{\"metricKey\":\"castsPerMin\",\"title\":\"Focus casts\",\"recommendation\":\"Review cast pacing next pull.\",\"reasoning\":\"It is the clearest deterministic gap.\"},\"fallbackUsed\":false,\"model\":\"gpt-5-mini\"}"
+						}
+					]
+				}
+			]
+		}`))
+	}))
+	defer server.Close()
+
+	client := openAIModelClient{
+		apiKey:     "test-key",
+		model:      "gpt-5-mini",
+		baseURL:    server.URL,
+		httpClient: server.Client(),
+	}
+
+	response, err := client.Generate(context.Background(), "test prompt", validRequest())
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if response.FallbackUsed {
+		t.Fatal("expected model response, got fallback")
+	}
+	if response.Model != "gpt-5-mini" {
+		t.Fatalf("expected model gpt-5-mini, got %s", response.Model)
+	}
+	if len(response.Insights) != 3 {
+		t.Fatalf("expected three insights, got %d", len(response.Insights))
+	}
+	if response.FocusRecommendation.MetricKey == "" {
+		t.Fatal("expected focus recommendation")
+	}
+}
+
+func TestSummarizeModelErrorCompactsLongMessages(t *testing.T) {
+	message := summarizeModelError(errors.New(strings.Repeat("provider failure\n", 40)))
+	if strings.Contains(message, "\n") {
+		t.Fatalf("expected newlines to be removed, got %q", message)
+	}
+	if len(message) > 303 {
+		t.Fatalf("expected compact message, got length %d", len(message))
 	}
 }
