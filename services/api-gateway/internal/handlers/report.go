@@ -105,6 +105,39 @@ func (h *ReportHandler) GetAbilityTimeline(w http.ResponseWriter, r *http.Reques
 	}
 }
 
+func (h *ReportHandler) GetBuffTimeline(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	jobID := strings.TrimPrefix(r.URL.Path, "/api/report/jobs/")
+	jobID = strings.TrimSuffix(jobID, "/buff-timeline")
+	jobID = strings.TrimSpace(jobID)
+	if jobID == "" {
+		http.Error(w, "jobId is required", http.StatusBadRequest)
+		return
+	}
+
+	abilityID, err := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("abilityId")))
+	if err != nil || abilityID == 0 {
+		http.Error(w, "abilityId is required", http.StatusBadRequest)
+		return
+	}
+
+	response, err := h.reportService.GetBuffTimeline(jobID, abilityID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Failed to encode buff timeline response: %v", err)
+	}
+}
+
 func (h *ReportHandler) GetResourceTimeline(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)

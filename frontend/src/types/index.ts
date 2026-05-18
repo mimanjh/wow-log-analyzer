@@ -173,6 +173,14 @@ export interface ResourceTimelineResponse {
   elite: ResourceTimelineSeries[]
 }
 
+export interface BuffTimelineResponse {
+  abilityId: number
+  abilityName: string
+  fightDurationMs: number
+  player: BuffTimelineSeries
+  elite: BuffTimelineSeries[]
+}
+
 export interface AbilityTimelineSeries {
   label: string
   subtitle?: string
@@ -194,6 +202,18 @@ export interface ResourceTimelineSample {
   value: number
   maxValue?: number
   waste?: number
+}
+
+export interface BuffTimelineSeries {
+  label: string
+  subtitle?: string
+  reportUrl?: string
+  windows: BuffTimelineWindow[]
+}
+
+export interface BuffTimelineWindow {
+  startMs: number
+  endMs: number
 }
 
 export interface ReportJobProgress {

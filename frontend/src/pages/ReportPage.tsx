@@ -6,6 +6,7 @@ import { usePageTitle } from "../hooks/usePageTitle";
 import { Button } from "../components/ui/Button";
 import {
     getAbilityTimeline,
+    getBuffTimeline,
     getReportJob,
     getResourceTimeline,
 } from "../lib/api";
@@ -21,6 +22,8 @@ import {
 import type {
     AbilityTimelineResponse,
     AbilityTimelineSeries,
+    BuffTimelineResponse,
+    BuffTimelineSeries,
     Character,
     Fight,
     ReportJob,
@@ -1104,6 +1107,172 @@ function renderProgressView(
     );
 }
 
+function BuffTimelineRow({
+    series,
+    durationMs,
+    toneClass,
+}: {
+    series: BuffTimelineSeries;
+    durationMs: number;
+    toneClass: string;
+}) {
+    const rowDurationMs = Math.max(1, durationMs);
+    const activeMs = series.windows.reduce(
+        (total, window) => total + Math.max(0, window.endMs - window.startMs),
+        0,
+    );
+
+    return (
+        <div className="grid gap-3 lg:grid-cols-[220px_minmax(0,1fr)] lg:items-center">
+            <div>
+                {series.reportUrl ? (
+                    <a
+                        href={series.reportUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-medium text-white transition hover:text-sky-300"
+                    >
+                        {series.label}
+                    </a>
+                ) : (
+                    <p className="font-medium text-white">{series.label}</p>
+                )}
+                {series.subtitle && (
+                    <p className="mt-1 text-sm text-slate-400">
+                        {series.subtitle}
+                    </p>
+                )}
+                <p className="mt-1 text-xs text-slate-500">
+                    {series.windows.length} windows,{" "}
+                    {formatSeconds(activeMs / 1000)} active
+                </p>
+            </div>
+            <div className="relative rounded-2xl border border-slate-800 bg-slate-950/80 px-3 pb-5 pt-3">
+                <div className="relative h-16 overflow-hidden rounded-xl bg-slate-900/90">
+                    {series.windows.map((window, index) => {
+                        const left = Math.min(
+                            100,
+                            Math.max(0, (window.startMs / rowDurationMs) * 100),
+                        );
+                        const right = Math.min(
+                            100,
+                            Math.max(0, (window.endMs / rowDurationMs) * 100),
+                        );
+                        const width = Math.max(0.5, right - left);
+
+                        return (
+                            <div
+                                key={`${series.label}-${window.startMs}-${window.endMs}-${index}`}
+                                className={`absolute top-1/2 h-8 -translate-y-1/2 rounded-md ${toneClass}`}
+                                style={{
+                                    left: `${left}%`,
+                                    width: `${width}%`,
+                                }}
+                                title={`${formatTimelineTimestamp(window.startMs)} - ${formatTimelineTimestamp(window.endMs)}`}
+                            />
+                        );
+                    })}
+                </div>
+                <div className="mt-2 flex justify-between text-xs text-slate-500">
+                    <span>0:00</span>
+                    <span>{formatTimelineTimestamp(rowDurationMs)}</span>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function BuffTimelineModal({
+    timeline,
+    loading,
+    error,
+    onClose,
+}: {
+    timeline: BuffTimelineResponse | null;
+    loading: boolean;
+    error: string | null;
+    onClose: () => void;
+}) {
+    if (!loading && !timeline && !error) {
+        return null;
+    }
+
+    const durationMs = timeline?.fightDurationMs ?? 1;
+
+    return (
+        <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 px-4 py-8 backdrop-blur-sm"
+            onClick={onClose}
+        >
+            <div
+                className="max-h-[90vh] w-full max-w-6xl overflow-y-auto rounded-3xl border border-slate-800 bg-slate-900 p-6 shadow-2xl"
+                onClick={(event) => event.stopPropagation()}
+            >
+                <div className="flex items-start justify-between gap-4">
+                    <div>
+                        <p className="text-sm uppercase tracking-[0.2em] text-sky-400">
+                            Buff Timeline
+                        </p>
+                        <h2 className="mt-2 text-2xl font-semibold text-white">
+                            {timeline?.abilityName ?? "Loading timeline"}
+                        </h2>
+                        <p className="mt-2 text-sm text-slate-400">
+                            Compare active buff windows against elite fight
+                            timelines on the same boss.
+                        </p>
+                    </div>
+                    <Button variant="secondary" onClick={onClose}>
+                        Close
+                    </Button>
+                </div>
+
+                {loading && (
+                    <div className="mt-8 rounded-3xl border border-slate-800 bg-slate-950/80 p-6 text-sm text-slate-300">
+                        Loading buff timeline...
+                    </div>
+                )}
+
+                {error && (
+                    <div className="mt-8 rounded-3xl border border-rose-500/30 bg-rose-950/20 p-6 text-sm text-rose-200">
+                        {error}
+                    </div>
+                )}
+
+                {timeline && (
+                    <div className="mt-8 space-y-8">
+                        <div className="space-y-4">
+                            <h3 className="text-lg font-semibold text-white">
+                                You
+                            </h3>
+                            <BuffTimelineRow
+                                series={timeline.player}
+                                durationMs={durationMs}
+                                toneClass="bg-sky-500/80"
+                            />
+                        </div>
+
+                        <div className="space-y-4">
+                            <h3 className="text-lg font-semibold text-white">
+                                Elite
+                            </h3>
+                            <div className="space-y-4">
+                                {timeline.elite.map((series) => (
+                                    <BuffTimelineRow
+                                        key={`${series.label}-${series.reportUrl ?? "elite"}`}
+                                        series={series}
+                                        durationMs={durationMs}
+                                        toneClass="bg-amber-500/80"
+                                    />
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
 function ResourceTimelineRow({
     series,
     durationMs,
@@ -1326,6 +1495,16 @@ export function ReportPage() {
     >({});
     const [timelineLoading, setTimelineLoading] = useState(false);
     const [timelineError, setTimelineError] = useState<string | null>(null);
+    const [buffTimelineAbilityId, setBuffTimelineAbilityId] = useState<
+        number | null
+    >(null);
+    const [buffTimelineCache, setBuffTimelineCache] = useState<
+        Record<number, BuffTimelineResponse>
+    >({});
+    const [buffTimelineLoading, setBuffTimelineLoading] = useState(false);
+    const [buffTimelineError, setBuffTimelineError] = useState<string | null>(
+        null,
+    );
     const [resourceTimelineTypeId, setResourceTimelineTypeId] = useState<
         number | null
     >(null);
@@ -1397,6 +1576,10 @@ export function ReportPage() {
         setTimelineCache({});
         setTimelineLoading(false);
         setTimelineError(null);
+        setBuffTimelineAbilityId(null);
+        setBuffTimelineCache({});
+        setBuffTimelineLoading(false);
+        setBuffTimelineError(null);
         setResourceTimelineTypeId(null);
         setResourceTimelineCache({});
         setResourceTimelineLoading(false);
@@ -1531,6 +1714,10 @@ export function ReportPage() {
             : undefined;
     const selectedTimeline =
         timelineAbilityId !== null ? timelineCache[timelineAbilityId] : null;
+    const selectedBuffTimeline =
+        buffTimelineAbilityId !== null
+            ? buffTimelineCache[buffTimelineAbilityId]
+            : null;
     const selectedResourceTimeline =
         resourceTimelineTypeId !== null
             ? resourceTimelineCache[resourceTimelineTypeId]
@@ -1564,6 +1751,39 @@ export function ReportPage() {
             );
         } finally {
             setTimelineLoading(false);
+        }
+    };
+
+    const openBuffTimeline = async (abilityId: number) => {
+        if (!reportJobId) {
+            setBuffTimelineError(
+                "Timeline data is not available for this report.",
+            );
+            return;
+        }
+
+        setBuffTimelineAbilityId(abilityId);
+        setBuffTimelineError(null);
+
+        if (buffTimelineCache[abilityId]) {
+            return;
+        }
+
+        setBuffTimelineLoading(true);
+        try {
+            const response = await getBuffTimeline(reportJobId, abilityId);
+            setBuffTimelineCache((current) => ({
+                ...current,
+                [abilityId]: response,
+            }));
+        } catch (error) {
+            setBuffTimelineError(
+                error instanceof Error
+                    ? error.message
+                    : "Failed to load buff timeline",
+            );
+        } finally {
+            setBuffTimelineLoading(false);
         }
     };
 
@@ -2003,7 +2223,12 @@ export function ReportPage() {
                                         {visibleBuffUptimes.map((entry) => (
                                             <tr
                                                 key={entry.abilityId}
-                                                className="border-b border-slate-900 align-top last:border-b-0"
+                                                className="cursor-pointer border-b border-slate-900 align-top transition hover:bg-slate-900/60 last:border-b-0"
+                                                onClick={() => {
+                                                    void openBuffTimeline(
+                                                        entry.abilityId,
+                                                    );
+                                                }}
                                             >
                                                 <td className="py-4 pr-4">
                                                     <p className="font-medium text-white">
@@ -2273,6 +2498,16 @@ export function ReportPage() {
                     setTimelineAbilityId(null);
                     setTimelineError(null);
                     setTimelineLoading(false);
+                }}
+            />
+            <BuffTimelineModal
+                timeline={selectedBuffTimeline}
+                loading={buffTimelineLoading}
+                error={buffTimelineError}
+                onClose={() => {
+                    setBuffTimelineAbilityId(null);
+                    setBuffTimelineError(null);
+                    setBuffTimelineLoading(false);
                 }}
             />
             <ResourceTimelineModal

@@ -2,6 +2,7 @@ import type {
   AbilityTimelineResponse,
   AuthStatus,
   BrowserCharacter,
+  BuffTimelineResponse,
   Character,
   CharacterReportsPage,
   Fight,
@@ -87,6 +88,26 @@ export async function getAbilityTimeline(
   if (!response.ok) {
     const errorText = await response.text()
     throw new Error(errorText || 'Failed to load ability timeline')
+  }
+
+  return response.json()
+}
+
+export async function getBuffTimeline(
+  jobId: string,
+  abilityId: number,
+): Promise<BuffTimelineResponse> {
+  const params = new URLSearchParams({
+    abilityId: String(abilityId),
+  })
+
+  const response = await fetch(
+    `/api/report/jobs/${encodeURIComponent(jobId)}/buff-timeline?${params.toString()}`,
+  )
+
+  if (!response.ok) {
+    const errorText = await response.text()
+    throw new Error(errorText || 'Failed to load buff timeline')
   }
 
   return response.json()

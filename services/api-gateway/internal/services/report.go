@@ -46,6 +46,14 @@ type ResourceTimelineResponse struct {
 	Elite           []ResourceTimelineSeries `json:"elite"`
 }
 
+type BuffTimelineResponse struct {
+	AbilityID       int                  `json:"abilityId"`
+	AbilityName     string               `json:"abilityName"`
+	FightDurationMS int64                `json:"fightDurationMs"`
+	Player          BuffTimelineSeries   `json:"player"`
+	Elite           []BuffTimelineSeries `json:"elite"`
+}
+
 type AbilityTimelineSeries struct {
 	Label     string  `json:"label"`
 	Subtitle  string  `json:"subtitle,omitempty"`
@@ -67,6 +75,18 @@ type ResourceTimelineSample struct {
 	Value       float64 `json:"value"`
 	MaxValue    float64 `json:"maxValue,omitempty"`
 	Waste       float64 `json:"waste,omitempty"`
+}
+
+type BuffTimelineSeries struct {
+	Label     string               `json:"label"`
+	Subtitle  string               `json:"subtitle,omitempty"`
+	ReportURL string               `json:"reportUrl,omitempty"`
+	Windows   []BuffTimelineWindow `json:"windows"`
+}
+
+type BuffTimelineWindow struct {
+	StartMS int64 `json:"startMs"`
+	EndMS   int64 `json:"endMs"`
 }
 
 type CohortEntry struct {
@@ -651,6 +671,73 @@ func (s *ReportService) GetResourceTimeline(jobID string, resourceTypeID int) (R
 	}, nil
 }
 
+func (s *ReportService) GetBuffTimeline(jobID string, abilityID int) (BuffTimelineResponse, error) {
+	if abilityID == 0 {
+		return BuffTimelineResponse{}, fmt.Errorf("abilityId is required")
+	}
+
+	s.jobMu.RLock()
+	job, ok := s.jobs[jobID]
+	s.jobMu.RUnlock()
+	if !ok {
+		return BuffTimelineResponse{}, fmt.Errorf("report job %s not found", jobID)
+	}
+	if job.timeline == nil {
+		return BuffTimelineResponse{}, fmt.Errorf("buff timeline is not available for this job yet")
+	}
+
+	playerSeries := buildBuffTimelineSeries(
+		job.timeline.PlayerData,
+		abilityID,
+		job.timeline.Character.Name,
+		fmt.Sprintf("%s %s", job.timeline.Character.Spec, job.timeline.Character.Class),
+		"",
+	)
+
+	eliteSeries := make([]BuffTimelineSeries, 0, len(job.timeline.EliteData))
+	for index, eliteData := range job.timeline.EliteData {
+		entry := job.timeline.EliteEntries[index]
+		subtitle := strings.TrimSpace(fmt.Sprintf("%s %s", entry.Spec, entry.Class))
+		if entry.Server != "" {
+			subtitle = strings.TrimSpace(fmt.Sprintf("%s - %s", subtitle, entry.Server))
+		}
+		series := buildBuffTimelineSeries(
+			eliteData,
+			abilityID,
+			entry.Name,
+			subtitle,
+			entry.ReportURL,
+		)
+		if len(series.Windows) > 0 {
+			eliteSeries = append(eliteSeries, series)
+		}
+	}
+	if len(playerSeries.Windows) == 0 && len(eliteSeries) == 0 {
+		return BuffTimelineResponse{}, fmt.Errorf("no buff timeline was available for this ability")
+	}
+
+	abilityName := findBuffName(job.timeline.PlayerData, abilityID)
+	if abilityName == "" {
+		for _, eliteData := range job.timeline.EliteData {
+			abilityName = findBuffName(eliteData, abilityID)
+			if abilityName != "" {
+				break
+			}
+		}
+	}
+	if abilityName == "" {
+		abilityName = "Selected Buff"
+	}
+
+	return BuffTimelineResponse{
+		AbilityID:       abilityID,
+		AbilityName:     abilityName,
+		FightDurationMS: job.timeline.PlayerData.FightEnd.Sub(job.timeline.PlayerData.FightStart).Milliseconds(),
+		Player:          playerSeries,
+		Elite:           eliteSeries,
+	}, nil
+}
+
 func (s *ReportService) runJob(jobID string, req GenerateReportRequest) {
 	ctx := context.Background()
 
@@ -1089,6 +1176,57 @@ func findAbilityName(data timelineFightData, abilityID int) string {
 		}
 	}
 	for _, event := range data.CooldownEvents {
+		if event.Ability.ID == abilityID {
+			return event.Ability.Name
+		}
+	}
+	return ""
+}
+
+func buildBuffTimelineSeries(data timelineFightData, abilityID int, label, subtitle, reportURL string) BuffTimelineSeries {
+	windows := buffWindows(data, abilityID)
+	timelineWindows := make([]BuffTimelineWindow, 0, len(windows))
+	durationMS := data.FightEnd.Sub(data.FightStart).Milliseconds()
+	if durationMS < 0 {
+		durationMS = 0
+	}
+
+	for _, window := range windows {
+		startMS := window.start.Sub(data.FightStart).Milliseconds()
+		endMS := window.end.Sub(data.FightStart).Milliseconds()
+		if startMS < 0 {
+			startMS = 0
+		}
+		if endMS < 0 {
+			endMS = 0
+		}
+		if durationMS > 0 {
+			if startMS > durationMS {
+				startMS = durationMS
+			}
+			if endMS > durationMS {
+				endMS = durationMS
+			}
+		}
+		if endMS <= startMS {
+			continue
+		}
+		timelineWindows = append(timelineWindows, BuffTimelineWindow{
+			StartMS: startMS,
+			EndMS:   endMS,
+		})
+	}
+
+	return BuffTimelineSeries{
+		Label:     label,
+		Subtitle:  subtitle,
+		ReportURL: reportURL,
+		Windows:   timelineWindows,
+	}
+}
+
+func findBuffName(data timelineFightData, abilityID int) string {
+	for _, event := range data.BuffEvents {
 		if event.Ability.ID == abilityID {
 			return event.Ability.Name
 		}

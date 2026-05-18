@@ -36,6 +36,10 @@ func RegisterRoutes(mux *http.ServeMux, cfg config.Config, analyzeService *servi
 			reportHandler.GetAbilityTimeline(w, r)
 			return
 		}
+		if strings.HasSuffix(r.URL.Path, "/buff-timeline") {
+			reportHandler.GetBuffTimeline(w, r)
+			return
+		}
 		if strings.HasSuffix(r.URL.Path, "/resource-timeline") {
 			reportHandler.GetResourceTimeline(w, r)
 			return
