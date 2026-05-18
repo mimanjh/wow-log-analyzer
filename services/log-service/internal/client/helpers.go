@@ -139,49 +139,181 @@ func normalizeResourceEvents(reportStartTime int64, raw []map[string]interface{}
 	events := make([]types.ResourceEvent, 0, len(raw))
 
 	for _, event := range raw {
-		resourceTypeID := 0
-		if value, ok := event["resourceChangeType"]; ok {
-			resourceTypeID = parseInt(value)
-		} else if value, ok := event["type"]; ok {
-			resourceTypeID = parseInt(value)
-		} else {
-			continue
-		}
-
+		eventsByType := make(map[int]types.ResourceEvent)
+		timestamp := parseTimestamp(reportStartTime, event["timestamp"])
 		sourceID := parseActorID(event, "sourceID", "source")
 		targetID := parseActorID(event, "targetID", "target")
 		if playerID != 0 && sourceID != playerID && targetID != playerID {
 			continue
 		}
 
-		change := parseFloat(event["resourceChange"])
-		if change == 0 {
-			change = parseFloat(event["amount"])
-		}
-		amount := parseFloat(event["resourceAmount"])
-		if amount == 0 {
-			amount = parseFloat(event["current"])
-		}
-		waste := parseFloat(event["waste"])
-		maxAmount := parseFloat(event["maxResourceAmount"])
-		if maxAmount == 0 {
-			maxAmount = parseFloat(event["resourceChangeMax"])
+		resourceTypeID, hasTopLevelResource := parseResourceTypeIDFromEvent(event)
+		if hasTopLevelResource {
+			change := parseFloat(event["resourceChange"])
+			if change == 0 {
+				change = parseFloat(event["amount"])
+			}
+			amount := parseFloat(event["resourceAmount"])
+			if amount == 0 {
+				amount = parseFloat(event["current"])
+			}
+			waste := parseFloat(event["waste"])
+			maxAmount := parseFloat(event["maxResourceAmount"])
+			if maxAmount == 0 {
+				maxAmount = parseFloat(event["resourceChangeMax"])
+			}
+
+			eventsByType[resourceTypeID] = types.ResourceEvent{
+				Timestamp:      timestamp,
+				SourceID:       sourceID,
+				TargetID:       targetID,
+				ResourceTypeID: resourceTypeID,
+				ResourceType:   resourceTypeName(resourceTypeID),
+				Amount:         amount,
+				Change:         change,
+				Waste:          waste,
+				MaxAmount:      maxAmount,
+			}
 		}
 
-		events = append(events, types.ResourceEvent{
-			Timestamp:      parseTimestamp(reportStartTime, event["timestamp"]),
-			SourceID:       sourceID,
-			TargetID:       targetID,
-			ResourceTypeID: resourceTypeID,
-			ResourceType:   resourceTypeName(resourceTypeID),
-			Amount:         amount,
-			Change:         change,
-			Waste:          waste,
-			MaxAmount:      maxAmount,
-		})
+		if playerID == 0 || sourceID == playerID {
+			mergeResourceDataEvents(eventsByType, timestamp, sourceID, targetID, event["sourceResources"])
+			mergeAdditionalResourceEvents(eventsByType, timestamp, sourceID, targetID, event["classResources"])
+		}
+		if playerID == 0 || targetID == playerID {
+			mergeResourceDataEvents(eventsByType, timestamp, sourceID, targetID, event["targetResources"])
+		}
+
+		for _, normalized := range eventsByType {
+			events = append(events, normalized)
+		}
 	}
 
 	return events
+}
+
+func parseResourceTypeIDFromEvent(event map[string]interface{}) (int, bool) {
+	if value, ok := event["resourceChangeType"]; ok {
+		return parseInt(value), true
+	}
+	if value, ok := event["type"]; ok {
+		return parseResourceTypeID(value)
+	}
+	return 0, false
+}
+
+func parseResourceTypeID(value interface{}) (int, bool) {
+	switch typed := value.(type) {
+	case float64, float32, int, int64, json.Number:
+		return parseInt(typed), true
+	case string:
+		trimmed := strings.TrimSpace(typed)
+		if trimmed == "" {
+			return 0, false
+		}
+		parsed, err := strconv.ParseInt(trimmed, 10, 64)
+		if err != nil {
+			return 0, false
+		}
+		return int(parsed), true
+	default:
+		return 0, false
+	}
+}
+
+func mergeResourceDataEvents(eventsByType map[int]types.ResourceEvent, timestamp time.Time, sourceID, targetID int, value interface{}) {
+	resourceMap, ok := value.(map[string]interface{})
+	if !ok {
+		return
+	}
+
+	if event, ok := resourceEventFromResourceData(timestamp, sourceID, targetID, resourceMap); ok {
+		mergeResourceEvent(eventsByType, event)
+	}
+	mergeAdditionalResourceEvents(eventsByType, timestamp, sourceID, targetID, resourceMap["additionalResources"])
+}
+
+func mergeAdditionalResourceEvents(eventsByType map[int]types.ResourceEvent, timestamp time.Time, sourceID, targetID int, value interface{}) {
+	switch typed := value.(type) {
+	case []interface{}:
+		for _, entry := range typed {
+			mergeAdditionalResourceEvents(eventsByType, timestamp, sourceID, targetID, entry)
+		}
+	case map[string]interface{}:
+		if event, ok := resourceEventFromResourceData(timestamp, sourceID, targetID, typed); ok {
+			mergeResourceEvent(eventsByType, event)
+			return
+		}
+		for _, entry := range typed {
+			mergeAdditionalResourceEvents(eventsByType, timestamp, sourceID, targetID, entry)
+		}
+	}
+}
+
+func resourceEventFromResourceData(timestamp time.Time, sourceID, targetID int, data map[string]interface{}) (types.ResourceEvent, bool) {
+	resourceTypeID := parseInt(data["resourceType"])
+	if resourceTypeID == 0 {
+		if parsed, ok := parseResourceTypeID(data["type"]); ok {
+			resourceTypeID = parsed
+		}
+	}
+	if resourceTypeID == 0 {
+		return types.ResourceEvent{}, false
+	}
+
+	amount := parseFloat(data["resourceAmount"])
+	if amount == 0 {
+		amount = parseFloat(data["amount"])
+	}
+	maxAmount := parseFloat(data["resourceCap"])
+	if maxAmount == 0 {
+		maxAmount = parseFloat(data["max"])
+	}
+	if maxAmount == 0 {
+		maxAmount = parseFloat(data["resourceMax"])
+	}
+	if maxAmount == 0 {
+		maxAmount = parseFloat(data["maxResourceAmount"])
+	}
+	cost := parseFloat(data["resourceCost"])
+	if cost == 0 {
+		cost = parseFloat(data["cost"])
+	}
+
+	return types.ResourceEvent{
+		Timestamp:      timestamp,
+		SourceID:       sourceID,
+		TargetID:       targetID,
+		ResourceTypeID: resourceTypeID,
+		ResourceType:   resourceTypeName(resourceTypeID),
+		Amount:         amount,
+		Change:         -cost,
+		MaxAmount:      maxAmount,
+	}, true
+}
+
+func mergeResourceEvent(eventsByType map[int]types.ResourceEvent, event types.ResourceEvent) {
+	existing, exists := eventsByType[event.ResourceTypeID]
+	if !exists {
+		eventsByType[event.ResourceTypeID] = event
+		return
+	}
+	if existing.Amount == 0 {
+		existing.Amount = event.Amount
+	}
+	if existing.MaxAmount == 0 {
+		existing.MaxAmount = event.MaxAmount
+	}
+	if existing.Change == 0 {
+		existing.Change = event.Change
+	}
+	if existing.Waste == 0 {
+		existing.Waste = event.Waste
+	}
+	if existing.ResourceType == "" {
+		existing.ResourceType = event.ResourceType
+	}
+	eventsByType[event.ResourceTypeID] = existing
 }
 
 func parseTimestamp(reportStartTime int64, value interface{}) time.Time {

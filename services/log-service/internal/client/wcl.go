@@ -1084,6 +1084,8 @@ func (c *WCLHTTPClient) fetchPlayerFightData(reportID string, fight types.Normal
 	if err != nil {
 		return types.PlayerFightData{}, err
 	}
+	resourceEventsRaw := append([]map[string]interface{}{}, resourceRaw...)
+	resourceEventsRaw = append(resourceEventsRaw, castRaw...)
 
 	return types.PlayerFightData{
 		PlayerID:       actorID,
@@ -1095,7 +1097,7 @@ func (c *WCLHTTPClient) fetchPlayerFightData(reportID string, fight types.Normal
 		HealEvents:     normalizeHealEvents(reportMetadata.StartTime.UnixMilli(), healRaw, abilityNames),
 		BuffEvents:     normalizeBuffEvents(reportMetadata.StartTime.UnixMilli(), buffRaw, abilityNames),
 		CooldownEvents: normalizeCooldownEvents(reportMetadata.StartTime.UnixMilli(), castRaw, abilityNames),
-		ResourceEvents: normalizeResourceEvents(reportMetadata.StartTime.UnixMilli(), resourceRaw, actorID),
+		ResourceEvents: normalizeResourceEvents(reportMetadata.StartTime.UnixMilli(), resourceEventsRaw, actorID),
 	}, nil
 }
 

@@ -420,3 +420,57 @@ func TestAnalysisService_ResourceUsageMatchesTimelineChangeFallback(t *testing.T
 		t.Fatalf("expected player average pct 50, got %f", comparisons[0].PlayerAveragePct)
 	}
 }
+
+func TestAnalysisService_ResourceUsageDerivesDeathKnightRunesFromCasts(t *testing.T) {
+	service := NewAnalysisService()
+	start := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+
+	playerData := types.PlayerFightData{
+		PlayerID:   1,
+		FightID:    100,
+		FightStart: start,
+		FightEnd:   start.Add(60 * time.Second),
+		CastEvents: []types.CastEvent{
+			{Timestamp: start.Add(5 * time.Second), Ability: types.Ability{ID: 206930, Name: "Heart Strike"}, SourceID: 1},
+			{Timestamp: start.Add(15 * time.Second), Ability: types.Ability{ID: 195182, Name: "Marrowrend"}, SourceID: 1},
+		},
+		ResourceEvents: []types.ResourceEvent{
+			{Timestamp: start, ResourceTypeID: 6, ResourceType: "Runic Power", Amount: 20, MaxAmount: 100},
+		},
+	}
+	cohortData := []types.PlayerFightData{
+		{
+			PlayerID:   2,
+			FightID:    100,
+			FightStart: start,
+			FightEnd:   start.Add(60 * time.Second),
+			CastEvents: []types.CastEvent{
+				{Timestamp: start.Add(5 * time.Second), Ability: types.Ability{ID: 206930, Name: "Heart Strike"}, SourceID: 2},
+			},
+			ResourceEvents: []types.ResourceEvent{
+				{Timestamp: start, ResourceTypeID: 6, ResourceType: "Runic Power", Amount: 30, MaxAmount: 100},
+			},
+		},
+	}
+
+	comparisons := service.CalculateResourceUsageComparisons(playerData, cohortData, "Death Knight", "Blood")
+	var runes *types.ResourceUsageComparison
+	for index := range comparisons {
+		if comparisons[index].ResourceTypeID == 5 {
+			runes = &comparisons[index]
+			break
+		}
+	}
+	if runes == nil {
+		t.Fatalf("expected rune comparison derived from Death Knight casts")
+	}
+	if runes.PlayerSpent != 3 {
+		t.Fatalf("expected player rune spent 3, got %f", runes.PlayerSpent)
+	}
+	if runes.CohortMedianSpent != 1 {
+		t.Fatalf("expected cohort rune spent 1, got %f", runes.CohortMedianSpent)
+	}
+	if runes.PlayerSampleCount != 2 {
+		t.Fatalf("expected two derived rune samples, got %d", runes.PlayerSampleCount)
+	}
+}

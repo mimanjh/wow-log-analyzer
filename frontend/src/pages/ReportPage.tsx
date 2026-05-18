@@ -1488,6 +1488,12 @@ export function ReportPage() {
         (left, right) => {
             if (left.fullWindowDeltaSeconds === right.fullWindowDeltaSeconds) {
                 if (left.fullMarkerDelta === right.fullMarkerDelta) {
+                    if (left.spentDelta !== right.spentDelta) {
+                        return (
+                            Math.abs(right.spentDelta) -
+                            Math.abs(left.spentDelta)
+                        );
+                    }
                     return left.resourceType.localeCompare(right.resourceType);
                 }
                 return right.fullMarkerDelta - left.fullMarkerDelta;
@@ -2123,6 +2129,9 @@ export function ReportPage() {
                                                 Resource
                                             </th>
                                             <th className="pb-3 pr-4 font-medium">
+                                                Used
+                                            </th>
+                                            <th className="pb-3 pr-4 font-medium">
                                                 Full Markers
                                             </th>
                                             <th className="pb-3 pr-4 font-medium">
@@ -2148,6 +2157,28 @@ export function ReportPage() {
                                                     <p className="mt-1 text-xs text-slate-500">
                                                         {entry.sampleSize} elite
                                                         comparisons
+                                                    </p>
+                                                </td>
+                                                <td className="py-4 pr-4 text-slate-200">
+                                                    <p>
+                                                        {entry.playerSpent.toFixed(
+                                                            0,
+                                                        )}
+                                                    </p>
+                                                    <p
+                                                        className={
+                                                            entry.spentDelta >=
+                                                            0
+                                                                ? "mt-1 text-xs text-emerald-400"
+                                                                : "mt-1 text-xs text-rose-400"
+                                                        }
+                                                    >
+                                                        {formatSigned(
+                                                            entry.spentDelta,
+                                                            "",
+                                                            0,
+                                                        )}{" "}
+                                                        vs elite
                                                     </p>
                                                 </td>
                                                 <td className="py-4 pr-4 text-slate-200">

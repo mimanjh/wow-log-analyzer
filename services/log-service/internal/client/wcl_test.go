@@ -191,6 +191,151 @@ func TestWCLHTTPClient_normalizeDifficulty(t *testing.T) {
 	}
 }
 
+func TestNormalizeResourceEvents_IncludesNestedSourceClassResources(t *testing.T) {
+	reportStart := int64(1700000000000)
+	raw := []map[string]interface{}{
+		{
+			"timestamp":          float64(1000),
+			"sourceID":           float64(10),
+			"resourceChangeType": float64(6),
+			"resourceChange":     float64(15),
+			"waste":              float64(0),
+			"sourceResources": map[string]interface{}{
+				"resourceType":   float64(6),
+				"resourceAmount": float64(45),
+				"resourceCap":    float64(100),
+				"additionalResources": []interface{}{
+					map[string]interface{}{
+						"resourceType":   float64(5),
+						"resourceAmount": float64(3),
+						"resourceCap":    float64(6),
+						"resourceCost":   float64(1),
+					},
+				},
+			},
+		},
+	}
+
+	events := normalizeResourceEvents(reportStart, raw, 10)
+	runicPower, ok := findResourceEvent(events, 6)
+	if !ok {
+		t.Fatalf("expected runic power resource event")
+	}
+	if runicPower.Amount != 45 {
+		t.Fatalf("expected runic power amount 45, got %f", runicPower.Amount)
+	}
+	if runicPower.Change != 15 {
+		t.Fatalf("expected runic power change 15, got %f", runicPower.Change)
+	}
+	if runicPower.MaxAmount != 100 {
+		t.Fatalf("expected runic power max 100, got %f", runicPower.MaxAmount)
+	}
+
+	runes, ok := findResourceEvent(events, 5)
+	if !ok {
+		t.Fatalf("expected rune resource event from nested class resources")
+	}
+	if runes.ResourceType != "Runes" {
+		t.Fatalf("expected rune resource type, got %s", runes.ResourceType)
+	}
+	if runes.Amount != 3 {
+		t.Fatalf("expected rune amount 3, got %f", runes.Amount)
+	}
+	if runes.MaxAmount != 6 {
+		t.Fatalf("expected rune max 6, got %f", runes.MaxAmount)
+	}
+	if runes.Change != -1 {
+		t.Fatalf("expected rune cost as change -1, got %f", runes.Change)
+	}
+}
+
+func TestNormalizeResourceEvents_IncludesNestedTargetComboPoints(t *testing.T) {
+	reportStart := int64(1700000000000)
+	raw := []map[string]interface{}{
+		{
+			"timestamp": float64(2000),
+			"sourceID":  float64(99),
+			"targetID":  float64(10),
+			"targetResources": map[string]interface{}{
+				"resourceType":   float64(3),
+				"resourceAmount": float64(70),
+				"resourceCap":    float64(100),
+				"additionalResources": map[string]interface{}{
+					"resourceType":   float64(4),
+					"resourceAmount": float64(4),
+					"resourceCap":    float64(5),
+				},
+			},
+		},
+	}
+
+	events := normalizeResourceEvents(reportStart, raw, 10)
+	comboPoints, ok := findResourceEvent(events, 4)
+	if !ok {
+		t.Fatalf("expected combo point resource event from nested target resources")
+	}
+	if comboPoints.ResourceType != "Combo Points" {
+		t.Fatalf("expected combo point resource type, got %s", comboPoints.ResourceType)
+	}
+	if comboPoints.Amount != 4 {
+		t.Fatalf("expected combo point amount 4, got %f", comboPoints.Amount)
+	}
+	if comboPoints.MaxAmount != 5 {
+		t.Fatalf("expected combo point max 5, got %f", comboPoints.MaxAmount)
+	}
+}
+
+func TestNormalizeResourceEvents_IncludesCastClassResourcesWithoutManaFallback(t *testing.T) {
+	reportStart := int64(1700000000000)
+	raw := []map[string]interface{}{
+		{
+			"timestamp": float64(3000),
+			"type":      "cast",
+			"sourceID":  float64(10),
+			"classResources": []interface{}{
+				map[string]interface{}{
+					"type":   float64(5),
+					"amount": float64(2),
+					"max":    float64(6),
+				},
+				map[string]interface{}{
+					"type":   "4",
+					"amount": float64(5),
+					"max":    float64(5),
+				},
+			},
+		},
+	}
+
+	events := normalizeResourceEvents(reportStart, raw, 10)
+	if _, ok := findResourceEvent(events, 0); ok {
+		t.Fatalf("did not expect cast event type string to create a mana resource event")
+	}
+	runes, ok := findResourceEvent(events, 5)
+	if !ok {
+		t.Fatalf("expected rune resource event from cast class resources")
+	}
+	if runes.Amount != 2 {
+		t.Fatalf("expected rune amount 2, got %f", runes.Amount)
+	}
+	comboPoints, ok := findResourceEvent(events, 4)
+	if !ok {
+		t.Fatalf("expected combo point resource event from cast class resources")
+	}
+	if comboPoints.Amount != 5 {
+		t.Fatalf("expected combo point amount 5, got %f", comboPoints.Amount)
+	}
+}
+
+func findResourceEvent(events []types.ResourceEvent, resourceTypeID int) (types.ResourceEvent, bool) {
+	for _, event := range events {
+		if event.ResourceTypeID == resourceTypeID {
+			return event, true
+		}
+	}
+	return types.ResourceEvent{}, false
+}
+
 func TestDeriveCharacterClassIDFromRecentReports_UsesExactCanonicalIDMatch(t *testing.T) {
 	character := WCLUserCharacter{
 		CanonicalID: 12345,

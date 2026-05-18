@@ -21,6 +21,20 @@ type resourceUsageSummary struct {
 	WastePct           float64
 }
 
+type resourceAggregate struct {
+	name              string
+	sampleCount       int
+	fullMarkerCount   int
+	fullWindowSeconds float64
+	generated         float64
+	waste             float64
+	spent             float64
+	weightedPctTotal  float64
+	timeAtMaxSeconds  float64
+	observedSeconds   float64
+	samples           []types.ResourceEvent
+}
+
 func (s *AnalysisService) CalculateResourceUsageComparisons(playerData types.PlayerFightData, cohortData []types.PlayerFightData, characterClass, characterSpec string) []types.ResourceUsageComparison {
 	strategy := resolveResourceStrategy(characterClass, characterSpec)
 	playerSummary := summarizeResourceUsage(playerData, strategy)
@@ -150,21 +164,7 @@ func summarizeResourceUsage(data types.PlayerFightData, strategy resourceStrateg
 		durationMinutes = 1
 	}
 
-	type aggregate struct {
-		name              string
-		sampleCount       int
-		fullMarkerCount   int
-		fullWindowSeconds float64
-		generated         float64
-		waste             float64
-		spent             float64
-		weightedPctTotal  float64
-		timeAtMaxSeconds  float64
-		observedSeconds   float64
-		samples           []types.ResourceEvent
-	}
-
-	aggregates := make(map[int]*aggregate)
+	aggregates := make(map[int]*resourceAggregate)
 	for _, event := range data.ResourceEvents {
 		if event.ResourceTypeID == 0 && event.ResourceType == "" {
 			continue
@@ -172,7 +172,7 @@ func summarizeResourceUsage(data types.PlayerFightData, strategy resourceStrateg
 
 		entry, ok := aggregates[event.ResourceTypeID]
 		if !ok {
-			entry = &aggregate{name: event.ResourceType}
+			entry = &resourceAggregate{name: event.ResourceType}
 			aggregates[event.ResourceTypeID] = entry
 		}
 		if entry.name == "" {
@@ -190,6 +190,7 @@ func summarizeResourceUsage(data types.PlayerFightData, strategy resourceStrateg
 		entry.sampleCount++
 		entry.samples = append(entry.samples, event)
 	}
+	addDerivedRuneSpend(aggregates, data, strategy)
 
 	summaries := make(map[int]resourceUsageSummary, len(aggregates))
 	for resourceTypeID, entry := range aggregates {
@@ -268,6 +269,62 @@ func summarizeResourceUsage(data types.PlayerFightData, strategy resourceStrateg
 	}
 
 	return summaries
+}
+
+func addDerivedRuneSpend(aggregates map[int]*resourceAggregate, data types.PlayerFightData, strategy resourceStrategy) {
+	if !strategy.resourceIDs[5] {
+		return
+	}
+	if existing, ok := aggregates[5]; ok && len(existing.samples) > 0 {
+		return
+	}
+
+	runeEvents := make([]types.ResourceEvent, 0)
+	for _, cast := range data.CastEvents {
+		runeCost := deathKnightRuneCost(cast.Ability.Name)
+		if runeCost <= 0 {
+			continue
+		}
+		runeEvents = append(runeEvents, types.ResourceEvent{
+			Timestamp:      cast.Timestamp,
+			SourceID:       cast.SourceID,
+			ResourceTypeID: 5,
+			ResourceType:   "Runes",
+			Change:         -float64(runeCost),
+			MaxAmount:      6,
+		})
+	}
+	if len(runeEvents) == 0 {
+		return
+	}
+
+	entry := &resourceAggregate{name: "Runes"}
+	for _, event := range runeEvents {
+		entry.spent += -event.Change
+		entry.sampleCount++
+		entry.samples = append(entry.samples, event)
+	}
+	aggregates[5] = entry
+}
+
+func deathKnightRuneCost(abilityName string) int {
+	switch strings.ToLower(strings.TrimSpace(abilityName)) {
+	case "heart strike",
+		"death's caress",
+		"death and decay",
+		"soul reaper",
+		"scourge strike",
+		"clawing shadows",
+		"festering strike",
+		"howling blast",
+		"frostscythe":
+		return 1
+	case "marrowrend",
+		"obliterate":
+		return 2
+	default:
+		return 0
+	}
 }
 
 func resourceSampleAmount(sample types.ResourceEvent) float64 {
