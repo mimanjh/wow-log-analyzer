@@ -1,13 +1,11 @@
 package config
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
 
-func TestSpecProfileFor_BloodDeathKnightUsesManualScreenshotReferences(t *testing.T) {
+func TestSpecProfileFor_BloodDeathKnightHasRotationSteps(t *testing.T) {
 	profile, ok := SpecProfileFor("Death Knight", "Blood")
 	if !ok {
 		t.Fatalf("expected Blood Death Knight profile")
@@ -18,14 +16,19 @@ func TestSpecProfileFor_BloodDeathKnightUsesManualScreenshotReferences(t *testin
 	if profile.Role != "Tank" {
 		t.Fatalf("expected Tank role, got %s", profile.Role)
 	}
-	if profile.SourceURL != "guide reference screenshots/blood-deathbringer.png" {
-		t.Fatalf("expected screenshot source, got %s", profile.SourceURL)
+	if len(profile.Rotation) != 2 {
+		t.Fatalf("expected two Blood Death Knight rotation sections (one per hero talent), got %d", len(profile.Rotation))
 	}
-	if len(profile.Rotation) != 3 {
-		t.Fatalf("expected three Blood Death Knight reference sections, got %d", len(profile.Rotation))
+	for _, section := range profile.Rotation {
+		if section.HeroTalent == "" {
+			t.Fatalf("expected hero talent on each rotation section")
+		}
+		if len(section.Steps) == 0 {
+			t.Fatalf("expected rotation steps for %s", section.HeroTalent)
+		}
 	}
 	if len(profile.Opener) != 0 {
-		t.Fatalf("expected manual screenshot profiles not to synthesize opener sections")
+		t.Fatalf("expected no opener sections, got %d", len(profile.Opener))
 	}
 
 	mechanics := strings.ToLower(strings.Join(profile.KeyMechanics, " "))
@@ -62,13 +65,15 @@ func TestSpecProfileFor_DisambiguatesSharedSpecNamesByClass(t *testing.T) {
 	if priest.Label != "Holy Priest" {
 		t.Fatalf("expected Holy Priest label, got %s", priest.Label)
 	}
-	if paladin.SourceURL == priest.SourceURL {
-		t.Fatalf("expected shared spec names to keep class-specific screenshot sources")
+	if len(paladin.Rotation) == 0 || len(priest.Rotation) == 0 {
+		t.Fatalf("expected both Holy Paladin and Holy Priest to have rotation sections")
+	}
+	if paladin.Rotation[0].Steps[0].Text == priest.Rotation[0].Steps[0].Text {
+		t.Fatalf("expected Holy Paladin and Holy Priest to have different rotation steps")
 	}
 }
 
-func TestManualSpecProfilesReferenceScreenshots(t *testing.T) {
-	seen := map[string]string{}
+func TestManualSpecProfiles_AllHaveRequiredFields(t *testing.T) {
 	for _, profile := range manualSpecProfiles {
 		if profile.Class == "" || profile.Spec == "" || profile.Role == "" {
 			t.Fatalf("expected class, spec, and role for every manual profile: %+v", profile)
@@ -76,39 +81,42 @@ func TestManualSpecProfilesReferenceScreenshots(t *testing.T) {
 		if len(profile.Mechanics) == 0 {
 			t.Fatalf("expected mechanics for %s %s", profile.Spec, profile.Class)
 		}
-		if len(profile.Screenshots) == 0 {
-			t.Fatalf("expected screenshot references for %s %s", profile.Spec, profile.Class)
+		if len(profile.HeroTalents) == 0 {
+			t.Fatalf("expected hero talent rotations for %s %s", profile.Spec, profile.Class)
 		}
-		for _, screenshot := range profile.Screenshots {
-			if screenshot.HeroTalent == "" || screenshot.File == "" {
-				t.Fatalf("expected hero talent and file for %s %s screenshot: %+v", profile.Spec, profile.Class, screenshot)
+		for _, ht := range profile.HeroTalents {
+			if ht.HeroTalent == "" {
+				t.Fatalf("expected hero talent name for %s %s", profile.Spec, profile.Class)
 			}
-			if !strings.HasPrefix(screenshot.File, "guide reference screenshots/") {
-				t.Fatalf("expected screenshot path under guide reference screenshots, got %s", screenshot.File)
+			if len(ht.Steps) == 0 {
+				t.Fatalf("expected rotation steps for %s %s / %s", profile.Spec, profile.Class, ht.HeroTalent)
 			}
-			if existing, ok := seen[screenshot.File]; ok {
-				t.Fatalf("screenshot %s is referenced by both %s and %s %s", screenshot.File, existing, profile.Spec, profile.Class)
-			}
-			seen[screenshot.File] = profile.Spec + " " + profile.Class
 		}
 	}
-	entries, err := os.ReadDir(filepath.Join("..", "..", "..", "..", "guide reference screenshots"))
-	if err != nil {
-		t.Fatalf("read guide reference screenshots: %v", err)
+}
+
+func TestManualSpecProfiles_BuildsCorrectRotationSections(t *testing.T) {
+	profile, ok := SpecProfileFor("Warrior", "Fury")
+	if !ok {
+		t.Fatalf("expected Fury Warrior profile")
 	}
-	expected := map[string]struct{}{}
-	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".png" {
-			continue
+	if len(profile.Rotation) != 2 {
+		t.Fatalf("expected 2 rotation sections for Fury Warrior, got %d", len(profile.Rotation))
+	}
+	for _, section := range profile.Rotation {
+		if section.Context != "Rotation" {
+			t.Fatalf("expected context 'Rotation', got %s", section.Context)
 		}
-		expected["guide reference screenshots/"+entry.Name()] = struct{}{}
-	}
-	if len(seen) != len(expected) {
-		t.Fatalf("expected %d screenshot references, got %d", len(expected), len(seen))
-	}
-	for file := range expected {
-		if _, ok := seen[file]; !ok {
-			t.Fatalf("expected manual profile reference for %s", file)
+		if section.HeroTalent == "" {
+			t.Fatalf("expected hero talent on rotation section")
+		}
+		if len(section.Steps) == 0 {
+			t.Fatalf("expected steps in rotation section for %s", section.HeroTalent)
+		}
+		for _, step := range section.Steps {
+			if strings.TrimSpace(step.Text) == "" {
+				t.Fatalf("expected non-empty step text in %s rotation", section.HeroTalent)
+			}
 		}
 	}
 }
