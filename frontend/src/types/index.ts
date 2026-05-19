@@ -13,6 +13,8 @@ export interface AnalyzeState {
   isLoading: boolean
   error: string | null
   setReportData: (data: { reportId: string | null; preferredFightId?: number | null; fights: Fight[]; characters: Character[] }) => void
+  setFightsForReport: (fights: Fight[]) => void
+  appendFightForReport: (fight: Fight) => void
   setCharactersForFight: (fightId: number, characters: Character[]) => void
   setSelectedFight: (fight: Fight | null) => void
   setSelectedCharacter: (character: Character | null) => void

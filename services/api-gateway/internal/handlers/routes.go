@@ -29,6 +29,7 @@ func RegisterRoutes(mux *http.ServeMux, cfg config.Config, analyzeService *servi
 		http.NotFound(w, r)
 	})
 	mux.HandleFunc("/api/analyze/intake", analyzeHandler.HandleIntake)
+	mux.HandleFunc("/api/analyze/fights", analyzeHandler.HandleFights)
 	mux.HandleFunc("/api/analyze/characters", analyzeHandler.HandleCharacters)
 	mux.HandleFunc("/api/report/jobs", reportHandler.CreateJob)
 	mux.HandleFunc("/api/report/jobs/", func(w http.ResponseWriter, r *http.Request) {

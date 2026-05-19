@@ -1,22 +1,35 @@
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAnalyzeStore } from "../stores/useAnalyzeStore";
 import { useBrowserStore } from "../stores/useBrowserStore";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { Button } from "../components/ui/Button";
-import { createReportJob, getCharacters } from "../lib/api";
+import { createReportJob, getCharacters, getFights } from "../lib/api";
 import { matchFightCharacter } from "../lib/characterMatching";
 import { getCharacterCardClasses } from "../lib/characterPresentation";
+import type { Character } from "../types";
+
+const FIGHT_DISCOVERY_BATCH_SIZE = 10;
 
 export function FightSelectPage() {
     usePageTitle("Select Fight");
     const navigate = useNavigate();
+    const charactersByFightRef = useRef<Map<number, Character[]>>(new Map());
+    const loadingFightIdsRef = useRef<Set<number>>(new Set());
+    const loadedFightsReportIdRef = useRef<string | null>(null);
+    const isLoadingFightsRef = useRef(false);
+    const [isDiscoveringFights, setIsDiscoveringFights] = useState(false);
+    const [discoveryProgress, setDiscoveryProgress] = useState({
+        checked: 0,
+        total: 0,
+    });
     const browserSelectedCharacter = useBrowserStore(
         (state) => state.selectedCharacter,
     );
     const {
         reportUrl,
         reportId,
+        preferredFightId,
         fights,
         characters,
         charactersFightId,
@@ -31,54 +44,173 @@ export function FightSelectPage() {
         setReportResult,
         setLoading,
         setError,
+        setFightsForReport,
+        appendFightForReport,
     } = useAnalyzeStore();
+
+    useEffect(() => {
+        charactersByFightRef.current.clear();
+        loadingFightIdsRef.current.clear();
+        loadedFightsReportIdRef.current = null;
+        isLoadingFightsRef.current = false;
+        setDiscoveryProgress({ checked: 0, total: 0 });
+    }, [reportId]);
 
     useEffect(() => {
         if (
             !reportId ||
-            !selectedFight ||
-            isLoading ||
-            (charactersFightId === selectedFight.id && characters.length > 0)
+            loadedFightsReportIdRef.current === reportId ||
+            isLoadingFightsRef.current
         ) {
             return;
         }
 
+        let cancelled = false;
+        isLoadingFightsRef.current = true;
+        setIsDiscoveringFights(true);
+        setDiscoveryProgress({ checked: 0, total: 0 });
+        setFightsForReport([]);
+        setError(null);
+
+        getFights(reportId, preferredFightId)
+            .then(async (nextFights) => {
+                if (cancelled) {
+                    return;
+                }
+                loadedFightsReportIdRef.current = reportId;
+                setDiscoveryProgress({ checked: 0, total: nextFights.length });
+
+                if (!browserSelectedCharacter) {
+                    setFightsForReport(nextFights);
+                    setDiscoveryProgress({
+                        checked: nextFights.length,
+                        total: nextFights.length,
+                    });
+                    return;
+                }
+
+                for (
+                    let index = 0;
+                    index < nextFights.length;
+                    index += FIGHT_DISCOVERY_BATCH_SIZE
+                ) {
+                    if (cancelled) {
+                        return;
+                    }
+
+                    const fightBatch = nextFights.slice(
+                        index,
+                        index + FIGHT_DISCOVERY_BATCH_SIZE,
+                    );
+                    const batchResults = await Promise.all(
+                        fightBatch.map(async (fight) => {
+                            const fightCharacters = await getCharacters(
+                                reportId,
+                                fight.id,
+                            );
+                            return {
+                                fight,
+                                fightCharacters,
+                                matchedCharacter: matchFightCharacter(
+                                    browserSelectedCharacter,
+                                    fightCharacters,
+                                ),
+                            };
+                        }),
+                    );
+
+                    if (cancelled) {
+                        return;
+                    }
+
+                    for (const result of batchResults) {
+                        charactersByFightRef.current.set(
+                            result.fight.id,
+                            result.fightCharacters,
+                        );
+                        if (result.matchedCharacter) {
+                            appendFightForReport(result.fight);
+                        }
+                    }
+                    setDiscoveryProgress({
+                        checked: Math.min(
+                            index + FIGHT_DISCOVERY_BATCH_SIZE,
+                            nextFights.length,
+                        ),
+                        total: nextFights.length,
+                    });
+                }
+            })
+            .catch((err) => {
+                if (cancelled) {
+                    return;
+                }
+                setError(
+                    err instanceof Error ? err.message : "Failed to load fights",
+                );
+            })
+            .finally(() => {
+                isLoadingFightsRef.current = false;
+                if (!cancelled) {
+                    setIsDiscoveringFights(false);
+                }
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [
+        reportId,
+        preferredFightId,
+        browserSelectedCharacter,
+        appendFightForReport,
+        setFightsForReport,
+        setError,
+    ]);
+
+    useEffect(() => {
+        if (!reportId || !selectedFight) {
+            return;
+        }
+
+        const selectedFightId = selectedFight.id;
+        if (charactersFightId === selectedFightId) {
+            charactersByFightRef.current.set(selectedFightId, characters);
+
+            const matchedCharacter = matchFightCharacter(
+                browserSelectedCharacter,
+                characters,
+            );
+            if (selectedCharacter?.id !== matchedCharacter?.id) {
+                setSelectedCharacter(matchedCharacter);
+            }
+            return;
+        }
+
+        const cachedCharacters = charactersByFightRef.current.get(selectedFightId);
+        if (cachedCharacters) {
+            setCharactersForFight(selectedFightId, cachedCharacters);
+            setSelectedCharacter(
+                matchFightCharacter(browserSelectedCharacter, cachedCharacters),
+            );
+            return;
+        }
+
+        if (loadingFightIdsRef.current.has(selectedFightId)) {
+            return;
+        }
+
+        loadingFightIdsRef.current.add(selectedFightId);
         setLoading(true);
         setError(null);
 
-        getCharacters(reportId, selectedFight.id)
-            .then(async (nextCharacters) => {
-                const matchedCharacter = matchFightCharacter(
-                    browserSelectedCharacter,
-                    nextCharacters,
+        getCharacters(reportId, selectedFightId)
+            .then((nextCharacters) => {
+                charactersByFightRef.current.set(selectedFightId, nextCharacters);
+                setCharactersForFight(selectedFightId, nextCharacters);
+                setSelectedCharacter(
+                    matchFightCharacter(browserSelectedCharacter, nextCharacters),
                 );
-
-                if (!matchedCharacter && browserSelectedCharacter) {
-                    for (const fight of fights) {
-                        if (fight.id === selectedFight.id) {
-                            continue;
-                        }
-
-                        const fightCharacters = await getCharacters(
-                            reportId,
-                            fight.id,
-                        );
-                        const fallbackCharacter = matchFightCharacter(
-                            browserSelectedCharacter,
-                            fightCharacters,
-                        );
-
-                        if (fallbackCharacter) {
-                            setSelectedFight(fight);
-                            setCharactersForFight(fight.id, fightCharacters);
-                            setSelectedCharacter(fallbackCharacter);
-                            return;
-                        }
-                    }
-                }
-
-                setCharactersForFight(selectedFight.id, nextCharacters);
-                setSelectedCharacter(matchedCharacter);
             })
             .catch((err) => {
                 setError(
@@ -86,16 +218,17 @@ export function FightSelectPage() {
                         ? err.message
                         : "Failed to load characters",
                 );
+            })
+            .finally(() => {
+                loadingFightIdsRef.current.delete(selectedFightId);
             });
     }, [
         reportId,
         selectedFight,
         charactersFightId,
-        characters.length,
-        fights,
-        isLoading,
+        characters,
+        selectedCharacter,
         setCharactersForFight,
-        setSelectedFight,
         setSelectedCharacter,
         setLoading,
         setError,
@@ -215,7 +348,9 @@ export function FightSelectPage() {
                 {isLoading && (
                     <div className="mt-6 rounded-3xl border border-slate-800 bg-slate-950/80 p-6">
                         <p className="text-sm text-slate-400">
-                            {selectedFight && charactersFightId !== selectedFight.id
+                            {fights.length === 0
+                                ? "Loading fights..."
+                                : selectedFight && charactersFightId !== selectedFight.id
                                 ? "Loading characters..."
                                 : "Generating report..."}
                         </p>
@@ -228,6 +363,14 @@ export function FightSelectPage() {
                             <h2 className="text-lg font-semibold text-white">
                                 Select a Fight
                             </h2>
+                            {isDiscoveringFights && (
+                                <p className="mt-2 text-sm text-slate-400">
+                                    Loading matching fights{" "}
+                                    {discoveryProgress.total > 0
+                                        ? `(${discoveryProgress.checked}/${discoveryProgress.total})`
+                                        : "..."}
+                                </p>
+                            )}
                             <div className="mt-4 space-y-2">
                                 {fights.map((fight) => {
                                     const isSelected =
@@ -253,7 +396,11 @@ export function FightSelectPage() {
                                                 onChange={() =>
                                                     setSelectedFight(fight)
                                                 }
-                                                className="text-sky-400 focus:ring-sky-500"
+                                                className="sr-only"
+                                            />
+                                            <span
+                                                className="w-5 shrink-0"
+                                                aria-hidden="true"
                                             />
                                             <span className="min-w-0 flex-1">
                                                 <span className="block truncate font-medium text-slate-100">
@@ -282,6 +429,12 @@ export function FightSelectPage() {
                                         </label>
                                     );
                                 })}
+                                {!isDiscoveringFights && fights.length === 0 && (
+                                    <p className="text-sm text-slate-400">
+                                        No fights for the selected character were
+                                        found in this report.
+                                    </p>
+                                )}
                             </div>
                         </div>
 

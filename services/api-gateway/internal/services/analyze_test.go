@@ -183,26 +183,16 @@ func TestAnalyzeService_ProcessIntake(t *testing.T) {
 			t.Errorf("ProcessIntake() ReportID = %v, want %v", resp.ReportID, "abc123")
 		}
 
-		if len(resp.Fights) != 3 {
-			t.Errorf("ProcessIntake() expected 3 fights, got %d", len(resp.Fights))
+		if len(resp.Fights) != 0 {
+			t.Errorf("ProcessIntake() expected fights to be lazy-loaded, got %d", len(resp.Fights))
 		}
 
-		if len(resp.Characters) != 1 {
-			t.Errorf("ProcessIntake() expected 1 character, got %d", len(resp.Characters))
+		if len(resp.Characters) != 0 {
+			t.Errorf("ProcessIntake() expected characters to be lazy-loaded, got %d", len(resp.Characters))
 		}
 
 		if resp.PreferredFightID != 2 {
 			t.Errorf("ProcessIntake() PreferredFightID = %v, want %v", resp.PreferredFightID, 2)
-		}
-
-		if len(resp.Fights) > 0 && resp.Fights[0].ID != 2 {
-			t.Errorf("ProcessIntake() expected preferred fight to be first, got %d", resp.Fights[0].ID)
-		}
-		if len(resp.Fights) > 1 && resp.Fights[1].ID != 1 {
-			t.Errorf("ProcessIntake() expected non-preferred raid fights to remain, got %#v", resp.Fights)
-		}
-		if len(resp.Fights) > 2 && resp.Fights[2].ID != 4 {
-			t.Errorf("ProcessIntake() expected valid wipe fights to remain, got %#v", resp.Fights)
 		}
 	})
 
@@ -216,4 +206,35 @@ func TestAnalyzeService_ProcessIntake(t *testing.T) {
 			t.Error("ProcessIntake() expected error for invalid URL")
 		}
 	})
+}
+
+func TestAnalyzeService_GetFightsForReport(t *testing.T) {
+	service := &AnalyzeService{
+		logClient: &stubLogClient{
+			fights: []FightSummary{
+				{ID: 1, Name: "Boss One", Difficulty: "Heroic", Kill: true, KillTime: 300, EncounterID: 101, StartTime: time.Unix(0, 0), EndTime: time.Unix(300, 0)},
+				{ID: 2, Name: "Boss Two", Difficulty: "Mythic", Kill: true, KillTime: 420, EncounterID: 102, StartTime: time.Unix(0, 0), EndTime: time.Unix(420, 0)},
+				{ID: 3, Name: "Dungeon Boss", Difficulty: "Unknown", Kill: true, KillTime: 180, EncounterID: 103, StartTime: time.Unix(0, 0), EndTime: time.Unix(180, 0)},
+				{ID: 4, Name: "Wipe Boss", Difficulty: "Heroic", Kill: false, KillTime: 240, EncounterID: 104, StartTime: time.Unix(0, 0), EndTime: time.Unix(240, 0)},
+			},
+		},
+	}
+
+	fights, err := service.GetFightsForReport("abc123", 2)
+	if err != nil {
+		t.Fatalf("GetFightsForReport() error = %v", err)
+	}
+
+	if len(fights) != 3 {
+		t.Fatalf("GetFightsForReport() expected 3 fights, got %d", len(fights))
+	}
+	if fights[0].ID != 2 {
+		t.Errorf("GetFightsForReport() expected preferred fight first, got %d", fights[0].ID)
+	}
+	if fights[1].ID != 1 {
+		t.Errorf("GetFightsForReport() expected non-preferred raid fights to remain, got %#v", fights)
+	}
+	if fights[2].ID != 4 {
+		t.Errorf("GetFightsForReport() expected valid wipe fights to remain, got %#v", fights)
+	}
 }

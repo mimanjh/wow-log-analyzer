@@ -34,6 +34,25 @@ export async function analyzeReport(url: string): Promise<AnalyzeResponse> {
   return response.json()
 }
 
+export async function getFights(reportId: string, preferredFightId?: number | null): Promise<Fight[]> {
+  const params = new URLSearchParams({
+    reportId,
+  })
+
+  if (preferredFightId) {
+    params.set('preferredFightId', String(preferredFightId))
+  }
+
+  const response = await fetch(`/api/analyze/fights?${params.toString()}`)
+
+  if (!response.ok) {
+    const errorText = await response.text()
+    throw new Error(errorText || 'Failed to load fights')
+  }
+
+  return response.json()
+}
+
 export async function getCharacters(reportId: string, fightId: number): Promise<Character[]> {
   const response = await fetch(`/api/analyze/characters?reportId=${encodeURIComponent(reportId)}&fightId=${fightId}`)
 

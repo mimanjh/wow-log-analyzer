@@ -88,3 +88,39 @@ func (h *AnalyzeHandler) HandleCharacters(w http.ResponseWriter, r *http.Request
 		log.Printf("Failed to encode characters response: %v", err)
 	}
 }
+
+func (h *AnalyzeHandler) HandleFights(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	reportID := r.URL.Query().Get("reportId")
+	if reportID == "" {
+		http.Error(w, "reportId is required", http.StatusBadRequest)
+		return
+	}
+
+	preferredFightID := 0
+	if fightIDParam := r.URL.Query().Get("preferredFightId"); fightIDParam != "" {
+		parsedFightID, err := strconv.Atoi(fightIDParam)
+		if err != nil || parsedFightID < 0 {
+			http.Error(w, "preferredFightId must be a valid integer", http.StatusBadRequest)
+			return
+		}
+		preferredFightID = parsedFightID
+	}
+
+	fights, err := h.analyzeService.GetFightsForReport(reportID, preferredFightID)
+	if err != nil {
+		log.Printf("Failed to get fights: %v", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(fights); err != nil {
+		log.Printf("Failed to encode fights response: %v", err)
+	}
+}

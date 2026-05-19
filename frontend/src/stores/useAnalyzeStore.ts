@@ -47,6 +47,36 @@ export const useAnalyzeStore = create<AnalyzeState>()(
         })
       },
 
+      setFightsForReport: (fights) => set((state) => {
+        const initialFight =
+          fights.find((fight) => fight.id === state.preferredFightId) ?? fights[0] ?? null
+
+        return {
+          fights,
+          characters: [],
+          charactersFightId: null,
+          selectedFight: state.selectedFight
+            ? fights.find((fight) => fight.id === state.selectedFight?.id) ?? initialFight
+            : initialFight,
+          selectedCharacter: null,
+          isLoading: false,
+          error: null,
+        }
+      }),
+
+      appendFightForReport: (fight) => set((state) => {
+        if (state.fights.some((existingFight) => existingFight.id === fight.id)) {
+          return state
+        }
+
+        return {
+          fights: [...state.fights, fight],
+          selectedFight: state.selectedFight ?? fight,
+          isLoading: false,
+          error: null,
+        }
+      }),
+
       setCharactersForFight: (fightId, characters) => set({
         charactersFightId: fightId,
         characters,

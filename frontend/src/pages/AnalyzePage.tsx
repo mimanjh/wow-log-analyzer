@@ -2,19 +2,15 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Button } from "../components/ui/Button";
 import {
-    type AnalyzeResponse,
     analyzeReport,
     getAuthStatus,
     getBrowserCharacters,
-    getCharacters,
     getCharacterReports,
 } from "../lib/api";
 import { usePageTitle } from "../hooks/usePageTitle";
-import { matchFightCharacter } from "../lib/characterMatching";
 import { getCharacterCardClasses } from "../lib/characterPresentation";
 import { useAnalyzeStore } from "../stores/useAnalyzeStore";
 import { useBrowserStore } from "../stores/useBrowserStore";
-import type { BrowserCharacter } from "../types";
 
 export function AnalyzePage() {
     usePageTitle("Select");
@@ -199,35 +195,6 @@ export function AnalyzePage() {
         setLoadingState,
     ]);
 
-    async function resolveReportDataForCharacter(
-        reportData: AnalyzeResponse,
-        character: BrowserCharacter | null,
-    ): Promise<AnalyzeResponse> {
-        if (!character || reportData.fights.length === 0) {
-            return reportData;
-        }
-
-        const initialMatch = matchFightCharacter(character, reportData.characters);
-        if (initialMatch) {
-            return reportData;
-        }
-
-        for (const fight of reportData.fights.slice(1)) {
-            const fightCharacters = await getCharacters(reportData.reportId, fight.id);
-            const matchedCharacter = matchFightCharacter(character, fightCharacters);
-
-            if (matchedCharacter) {
-                return {
-                    ...reportData,
-                    preferredFightId: fight.id,
-                    characters: fightCharacters,
-                };
-            }
-        }
-
-        return reportData;
-    }
-
     async function handleSelectReport(reportCode: string) {
         const reportUrl = `https://www.warcraftlogs.com/reports/${reportCode}`;
         setReportUrl(reportUrl);
@@ -236,11 +203,7 @@ export function AnalyzePage() {
 
         try {
             const data = await analyzeReport(reportUrl);
-            const reportData = await resolveReportDataForCharacter(
-                data,
-                selectedCharacter,
-            );
-            setReportData(reportData);
+            setReportData(data);
             navigate("/select");
         } catch (err) {
             setError(
@@ -265,7 +228,9 @@ export function AnalyzePage() {
             const page = await getCharacterReports(selectedCharacter.id);
             resetReports();
             appendReports(page);
-            setToastMessage(`${selectedCharacter.name}'s recent logs refreshed.`);
+            setToastMessage(
+                `${selectedCharacter.name}'s recent log reports refreshed.`,
+            );
         } catch (err) {
             setError(
                 err instanceof Error
@@ -341,7 +306,7 @@ export function AnalyzePage() {
     return (
         <section className="space-y-8">
             <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-8">
-                    <p className="text-sm uppercase tracking-[0.25em] text-sky-400">
+                <p className="text-sm uppercase tracking-[0.25em] text-sky-400">
                     Select
                 </p>
                 <h1 className="mt-3 text-3xl font-semibold text-white">
@@ -413,7 +378,7 @@ export function AnalyzePage() {
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <h2 className="text-lg font-semibold text-white">
                             {selectedCharacter
-                                ? `${selectedCharacter.name}'s recent logs`
+                                ? `${selectedCharacter.name}'s recent log reports`
                                 : "Select a character"}
                         </h2>
                         {selectedCharacter && (

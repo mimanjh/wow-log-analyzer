@@ -211,31 +211,29 @@ func (s *AnalyzeService) ProcessIntake(req AnalyzeIntakeRequest) (AnalyzeIntakeR
 		return AnalyzeIntakeResponse{}, fmt.Errorf("validation failed: %s", validation.Error)
 	}
 
-	// Call log-service to get fights
-	fights, err := s.logClient.GetFights(validation.ReportID)
-	if err != nil {
-		log.Printf("Failed to get fights from log-service: %v", err)
-		return AnalyzeIntakeResponse{}, fmt.Errorf("failed to retrieve fights: %w", err)
-	}
-
-	fights = filterRelevantFights(fights)
-	fights = prioritizeFight(fights, validation.PreferredFightID)
-
-	characters := []CharacterSummary{}
-	if len(fights) > 0 {
-		characters, err = s.logClient.GetCharacters(validation.ReportID, fights[0].ID)
-		if err != nil {
-			log.Printf("Failed to get characters from log-service: %v", err)
-			return AnalyzeIntakeResponse{}, fmt.Errorf("failed to retrieve characters: %w", err)
-		}
-	}
-
 	return AnalyzeIntakeResponse{
 		ReportID:         validation.ReportID,
 		PreferredFightID: validation.PreferredFightID,
-		Fights:           fights,
-		Characters:       characters,
+		Fights:           []FightSummary{},
+		Characters:       []CharacterSummary{},
 	}, nil
+}
+
+func (s *AnalyzeService) GetFightsForReport(reportID string, preferredFightID int) ([]FightSummary, error) {
+	if strings.TrimSpace(reportID) == "" {
+		return nil, fmt.Errorf("reportId is required")
+	}
+
+	fights, err := s.logClient.GetFights(reportID)
+	if err != nil {
+		log.Printf("Failed to get fights from log-service: %v", err)
+		return nil, fmt.Errorf("failed to retrieve fights: %w", err)
+	}
+
+	fights = filterRelevantFights(fights)
+	fights = prioritizeFight(fights, preferredFightID)
+
+	return fights, nil
 }
 
 func (s *AnalyzeService) GetCharactersForFight(reportID string, fightID int) ([]CharacterSummary, error) {
