@@ -17,14 +17,15 @@ type WCLZone struct {
 
 // WCLFight represents the raw Warcraft Logs API fight structure
 type WCLFight struct {
-	ID             int     `json:"id"`
-	Name           string  `json:"name"`
-	StartTime      int64   `json:"startTime"`
-	EndTime        int64   `json:"endTime"`
-	EncounterID    int     `json:"encounterID"`
-	Difficulty     int     `json:"difficulty"`
-	Kill           bool    `json:"kill"`
-	BossPercentage float64 `json:"bossPercentage"`
+	ID              int     `json:"id"`
+	Name            string  `json:"name"`
+	StartTime       int64   `json:"startTime"`
+	EndTime         int64   `json:"endTime"`
+	EncounterID     int     `json:"encounterID"`
+	Difficulty      int     `json:"difficulty"`
+	Kill            bool    `json:"kill"`
+	BossPercentage  float64 `json:"bossPercentage"`
+	FriendlyPlayers []int   `json:"friendlyPlayers"`
 }
 
 type WCLActor struct {
@@ -123,6 +124,10 @@ type WCLRankedCharacter struct {
 	Server      WCLServer `json:"server"`
 }
 
+type WCLReportMasterData struct {
+	Actors []WCLActor `json:"actors"`
+}
+
 type WCLReportSummary struct {
 	Code             string               `json:"code"`
 	Title            string               `json:"title"`
@@ -131,6 +136,7 @@ type WCLReportSummary struct {
 	Zone             *WCLZone             `json:"zone"`
 	Fights           []WCLFight           `json:"fights"`
 	RankedCharacters []WCLRankedCharacter `json:"rankedCharacters"`
+	MasterData       WCLReportMasterData  `json:"masterData"`
 }
 
 type WCLReportPagination struct {

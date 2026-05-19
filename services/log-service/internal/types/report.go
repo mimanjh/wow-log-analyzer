@@ -19,14 +19,22 @@ type Zone struct {
 
 // NormalizedFight represents a fight in our internal format
 type NormalizedFight struct {
-	ID          int       `json:"id"`
-	Name        string    `json:"name"`
-	StartTime   time.Time `json:"startTime"`
-	EndTime     time.Time `json:"endTime"`
-	EncounterID int       `json:"encounterId"`
-	Difficulty  string    `json:"difficulty"`
-	Kill        bool      `json:"kill"`
-	BossPercent float64   `json:"bossPercent"`
+	ID              int                `json:"id"`
+	Name            string             `json:"name"`
+	StartTime       time.Time          `json:"startTime"`
+	EndTime         time.Time          `json:"endTime"`
+	EncounterID     int                `json:"encounterId"`
+	Difficulty      string             `json:"difficulty"`
+	Kill            bool               `json:"kill"`
+	BossPercent     float64            `json:"bossPercent"`
+	FriendlyPlayers []FightParticipant `json:"friendlyPlayers,omitempty"`
+}
+
+type FightParticipant struct {
+	ID         int    `json:"id"`
+	Name       string `json:"name"`
+	ServerName string `json:"serverName,omitempty"`
+	Class      string `json:"class,omitempty"`
 }
 
 // FightSummary is a simplified version for initial fight selection

@@ -2,8 +2,6 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { BrowserState } from "../types";
 
-const REPORTS_TTL_MS = 24 * 60 * 60 * 1000;
-
 const initialState = {
     auth: null,
     characters: [],
@@ -34,7 +32,7 @@ export const useBrowserStore = create<BrowserState>()(
                         ? characters.find(
                               (character) =>
                                   character.id === state.selectedCharacter?.id,
-                          ) ?? state.selectedCharacter
+                          ) ?? null
                         : null,
                     isCharactersLoading: false,
                     error: null,
@@ -89,37 +87,21 @@ export const useBrowserStore = create<BrowserState>()(
             partialize: (state) => ({
                 auth: state.auth,
                 selectedCharacter: state.selectedCharacter,
-                reports: state.reports,
-                reportsCachedAt: state.reportsCachedAt,
-                nextCursor: state.nextCursor,
-                hasMoreReports: state.hasMoreReports,
             }),
             merge: (persistedState, currentState) => {
-                const persisted = {
-                    ...(persistedState as Partial<BrowserState>),
-                };
-                delete (persisted as Partial<BrowserState>).characters;
+                const persisted = (persistedState ?? {}) as Partial<BrowserState>;
 
-                const mergedState = {
+                return {
                     ...currentState,
-                    ...persisted,
+                    auth: persisted.auth ?? currentState.auth,
+                    selectedCharacter:
+                        persisted.selectedCharacter ??
+                        currentState.selectedCharacter,
+                    reports: [],
+                    reportsCachedAt: null,
+                    nextCursor: null,
+                    hasMoreReports: false,
                 };
-                const reportsCachedAt = mergedState.reportsCachedAt;
-
-                if (
-                    reportsCachedAt !== null &&
-                    Date.now() - reportsCachedAt > REPORTS_TTL_MS
-                ) {
-                    return {
-                        ...mergedState,
-                        reports: [],
-                        reportsCachedAt: null,
-                        nextCursor: null,
-                        hasMoreReports: false,
-                    };
-                }
-
-                return mergedState;
             },
         },
     ),

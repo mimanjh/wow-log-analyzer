@@ -93,6 +93,18 @@ func TestWCLHTTPClient_GetFights(t *testing.T) {
 		"data": {
 			"reportData": {
 				"report": {
+					"masterData": {
+						"actors": [
+							{
+								"id": 10,
+								"name": "Jaicherdk",
+								"server": "Tichondrius",
+								"type": "Player",
+								"subType": "Death Knight",
+								"gameID": 12345
+							}
+						]
+					},
 					"fights": [
 						{
 							"id": 1,
@@ -102,7 +114,8 @@ func TestWCLHTTPClient_GetFights(t *testing.T) {
 							"encounterID": 1234,
 							"difficulty": 3,
 							"kill": true,
-							"bossPercentage": 0
+							"bossPercentage": 0,
+							"friendlyPlayers": [10]
 						}
 					]
 				}
@@ -139,6 +152,9 @@ func TestWCLHTTPClient_GetFights(t *testing.T) {
 		Difficulty:  "Normal",
 		Kill:        true,
 		BossPercent: 0,
+		FriendlyPlayers: []types.FightParticipant{
+			{ID: 10, Name: "Jaicherdk", ServerName: "Tichondrius", Class: "Death Knight"},
+		},
 	}
 
 	if fight.ID != expected.ID {
@@ -164,6 +180,9 @@ func TestWCLHTTPClient_GetFights(t *testing.T) {
 	}
 	if fight.BossPercent != expected.BossPercent {
 		t.Errorf("Expected BossPercent %f, got %f", expected.BossPercent, fight.BossPercent)
+	}
+	if len(fight.FriendlyPlayers) != 1 || fight.FriendlyPlayers[0] != expected.FriendlyPlayers[0] {
+		t.Errorf("Expected FriendlyPlayers %#v, got %#v", expected.FriendlyPlayers, fight.FriendlyPlayers)
 	}
 }
 

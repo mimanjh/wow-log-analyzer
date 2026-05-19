@@ -9,8 +9,6 @@ import { matchFightCharacter } from "../lib/characterMatching";
 import { getCharacterCardClasses } from "../lib/characterPresentation";
 import type { Character, Fight } from "../types";
 
-const FIGHT_DISCOVERY_BATCH_SIZE = 10;
-
 export function FightSelectPage() {
     usePageTitle("Select Fight");
     const navigate = useNavigate();
@@ -45,7 +43,6 @@ export function FightSelectPage() {
         setLoading,
         setError,
         setFightsForReport,
-        appendFightForReport,
     } = useAnalyzeStore();
 
     useEffect(() => {
@@ -57,9 +54,26 @@ export function FightSelectPage() {
     }, [reportId]);
 
     useEffect(() => {
+        const characterFilter = browserSelectedCharacter
+            ? {
+                  name: browserSelectedCharacter.name,
+                  serverName: browserSelectedCharacter.serverName,
+                  serverSlug: browserSelectedCharacter.serverSlug,
+                  className: browserSelectedCharacter.class,
+              }
+            : null;
+        const loadKey = [
+            reportId,
+            preferredFightId ?? "",
+            characterFilter?.name ?? "",
+            characterFilter?.serverName ?? "",
+            characterFilter?.serverSlug ?? "",
+            characterFilter?.className ?? "",
+        ].join(":");
+
         if (
             !reportId ||
-            loadedFightsReportIdRef.current === reportId ||
+            loadedFightsReportIdRef.current === loadKey ||
             isLoadingFightsRef.current
         ) {
             return;
@@ -72,74 +86,17 @@ export function FightSelectPage() {
         setFightsForReport([]);
         setError(null);
 
-        getFights(reportId, preferredFightId)
-            .then(async (nextFights) => {
+        getFights(reportId, preferredFightId, characterFilter)
+            .then((nextFights) => {
                 if (cancelled) {
                     return;
                 }
-                loadedFightsReportIdRef.current = reportId;
-                setDiscoveryProgress({ checked: 0, total: nextFights.length });
-
-                if (!browserSelectedCharacter) {
-                    setFightsForReport(nextFights);
-                    setDiscoveryProgress({
-                        checked: nextFights.length,
-                        total: nextFights.length,
-                    });
-                    return;
-                }
-
-                for (
-                    let index = 0;
-                    index < nextFights.length;
-                    index += FIGHT_DISCOVERY_BATCH_SIZE
-                ) {
-                    if (cancelled) {
-                        return;
-                    }
-
-                    const fightBatch = nextFights.slice(
-                        index,
-                        index + FIGHT_DISCOVERY_BATCH_SIZE,
-                    );
-                    const batchResults = await Promise.all(
-                        fightBatch.map(async (fight) => {
-                            const fightCharacters = await getCharacters(
-                                reportId,
-                                fight.id,
-                            );
-                            return {
-                                fight,
-                                fightCharacters,
-                                matchedCharacter: matchFightCharacter(
-                                    browserSelectedCharacter,
-                                    fightCharacters,
-                                ),
-                            };
-                        }),
-                    );
-
-                    if (cancelled) {
-                        return;
-                    }
-
-                    for (const result of batchResults) {
-                        charactersByFightRef.current.set(
-                            result.fight.id,
-                            result.fightCharacters,
-                        );
-                        if (result.matchedCharacter) {
-                            appendFightForReport(result.fight);
-                        }
-                    }
-                    setDiscoveryProgress({
-                        checked: Math.min(
-                            index + FIGHT_DISCOVERY_BATCH_SIZE,
-                            nextFights.length,
-                        ),
-                        total: nextFights.length,
-                    });
-                }
+                loadedFightsReportIdRef.current = loadKey;
+                setFightsForReport(nextFights);
+                setDiscoveryProgress({
+                    checked: nextFights.length,
+                    total: nextFights.length,
+                });
             })
             .catch((err) => {
                 if (cancelled) {
@@ -163,7 +120,6 @@ export function FightSelectPage() {
         reportId,
         preferredFightId,
         browserSelectedCharacter,
-        appendFightForReport,
         setFightsForReport,
         setError,
     ]);

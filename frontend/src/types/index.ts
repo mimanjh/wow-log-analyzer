@@ -69,6 +69,15 @@ export interface BrowserCharacter {
   serverSlug?: string
 }
 
+export interface CharacterFightSummary {
+  id: number
+  name: string
+  difficulty: string
+  kill: boolean
+  killTime: number
+  encounterId: number
+}
+
 export interface CharacterReportSummary {
   code: string
   title: string
@@ -76,6 +85,7 @@ export interface CharacterReportSummary {
   bossNames?: string[]
   startTime: string
   endTime: string
+  fights?: CharacterFightSummary[]
 }
 
 export interface CharacterReportsPage {
@@ -94,6 +104,14 @@ export interface Fight {
   startTime: string
   endTime: string
   bossPercent?: number
+  friendlyPlayers?: FightParticipant[]
+}
+
+export interface FightParticipant {
+  id: number
+  name: string
+  serverName?: string
+  class?: string
 }
 
 export interface Character {

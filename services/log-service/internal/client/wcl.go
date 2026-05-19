@@ -101,6 +101,17 @@ func (c *WCLHTTPClient) GetFights(reportID string) ([]types.NormalizedFight, err
 			reportData {
 				report(code: "%s") {
 					startTime
+					masterData {
+						actors(type: "Player") {
+							id
+							name
+							server
+							type
+							subType
+							gameID
+							petOwner
+						}
+					}
 					fights(killType: Encounters) {
 						id
 						name
@@ -110,6 +121,7 @@ func (c *WCLHTTPClient) GetFights(reportID string) ([]types.NormalizedFight, err
 						difficulty
 						kill
 						bossPercentage
+						friendlyPlayers
 					}
 				}
 			}
@@ -119,8 +131,11 @@ func (c *WCLHTTPClient) GetFights(reportID string) ([]types.NormalizedFight, err
 		Data struct {
 			ReportData struct {
 				Report struct {
-					StartTime int64      `json:"startTime"`
-					Fights    []WCLFight `json:"fights"`
+					StartTime  int64 `json:"startTime"`
+					MasterData struct {
+						Actors []WCLActor `json:"actors"`
+					} `json:"masterData"`
+					Fights []WCLFight `json:"fights"`
 				} `json:"report"`
 			} `json:"reportData"`
 		} `json:"data"`
@@ -133,6 +148,7 @@ func (c *WCLHTTPClient) GetFights(reportID string) ([]types.NormalizedFight, err
 	return c.normalizeFights(
 		response.Data.ReportData.Report.StartTime,
 		response.Data.ReportData.Report.Fights,
+		response.Data.ReportData.Report.MasterData.Actors,
 	), nil
 }
 
@@ -514,18 +530,49 @@ func (c *WCLHTTPClient) GetCharacterReports(accessToken string, characterID int,
 		for index := currentOffset; index < len(matchingReports); index++ {
 			report := matchingReports[index]
 
+			actorID := findCharacterActorID(character.Name, character.Server.Name, character.Server.Slug, report.MasterData.Actors)
+
 			zoneName := ""
 			if report.Zone != nil {
 				zoneName = report.Zone.Name
+			}
+
+			var characterFights []types.CharacterFightSummary
+			for _, fight := range report.Fights {
+				if fight.EncounterID == 0 {
+					continue
+				}
+				if !fightHasActor(fight, actorID) {
+					continue
+				}
+				difficulty := c.normalizeDifficulty(fight.Difficulty)
+				if strings.EqualFold(difficulty, "Unknown") {
+					continue
+				}
+				startMS := absoluteReportTimestamp(report.StartTime, fight.StartTime)
+				endMS := absoluteReportTimestamp(report.StartTime, fight.EndTime)
+				killTime := 0
+				if endMS > startMS {
+					killTime = int((endMS - startMS) / 1000)
+				}
+				characterFights = append(characterFights, types.CharacterFightSummary{
+					ID:          fight.ID,
+					Name:        fight.Name,
+					Difficulty:  difficulty,
+					Kill:        fight.Kill,
+					KillTime:    killTime,
+					EncounterID: fight.EncounterID,
+				})
 			}
 
 			collected = append(collected, types.CharacterReportSummary{
 				Code:      report.Code,
 				Title:     report.Title,
 				ZoneName:  zoneName,
-				BossNames: extractKilledBossNames(report.Fights),
+				BossNames: extractKilledBossNamesFromSummaries(characterFights),
 				StartTime: time.UnixMilli(report.StartTime),
 				EndTime:   time.UnixMilli(report.EndTime),
+				Fights:    characterFights,
 			})
 			if len(collected) == limit {
 				nextOffset := index + 1
@@ -616,23 +663,66 @@ func (c *WCLHTTPClient) normalizeReport(wclReport WCLReport) *types.NormalizedRe
 }
 
 // normalizeFights converts WCL API fights to our internal format
-func (c *WCLHTTPClient) normalizeFights(reportStartTime int64, wclFights []WCLFight) []types.NormalizedFight {
+func (c *WCLHTTPClient) normalizeFights(reportStartTime int64, wclFights []WCLFight, actors []WCLActor) []types.NormalizedFight {
+	actorByID := make(map[int]WCLActor, len(actors))
+	for _, actor := range actors {
+		if actor.ID == 0 || actor.PetOwner != 0 {
+			continue
+		}
+		actorByID[actor.ID] = actor
+	}
+
 	fights := make([]types.NormalizedFight, len(wclFights))
 	for i, fight := range wclFights {
 		startTime := absoluteReportTimestamp(reportStartTime, fight.StartTime)
 		endTime := absoluteReportTimestamp(reportStartTime, fight.EndTime)
 		fights[i] = types.NormalizedFight{
-			ID:          fight.ID,
-			Name:        fight.Name,
-			StartTime:   time.UnixMilli(startTime),
-			EndTime:     time.UnixMilli(endTime),
-			EncounterID: fight.EncounterID,
-			Difficulty:  c.normalizeDifficulty(fight.Difficulty),
-			Kill:        fight.Kill,
-			BossPercent: fight.BossPercentage,
+			ID:              fight.ID,
+			Name:            fight.Name,
+			StartTime:       time.UnixMilli(startTime),
+			EndTime:         time.UnixMilli(endTime),
+			EncounterID:     fight.EncounterID,
+			Difficulty:      c.normalizeDifficulty(fight.Difficulty),
+			Kill:            fight.Kill,
+			BossPercent:     fight.BossPercentage,
+			FriendlyPlayers: friendlyFightParticipants(fight.FriendlyPlayers, actorByID),
 		}
 	}
 	return fights
+}
+
+func friendlyFightParticipants(friendlyPlayers []int, actorByID map[int]WCLActor) []types.FightParticipant {
+	if len(friendlyPlayers) == 0 || len(actorByID) == 0 {
+		return nil
+	}
+
+	participants := make([]types.FightParticipant, 0, len(friendlyPlayers))
+	seen := make(map[int]struct{}, len(friendlyPlayers))
+	for _, actorID := range friendlyPlayers {
+		actor, ok := actorByID[actorID]
+		if !ok || strings.TrimSpace(actor.Name) == "" {
+			continue
+		}
+		if _, exists := seen[actor.ID]; exists {
+			continue
+		}
+		seen[actor.ID] = struct{}{}
+		className := normalizeClass(actor.SubType)
+		if className == "" || strings.EqualFold(className, "Player") {
+			className = normalizeClass(actor.Type)
+		}
+		if strings.EqualFold(className, "Player") {
+			className = ""
+		}
+		participants = append(participants, types.FightParticipant{
+			ID:         actor.ID,
+			Name:       strings.TrimSpace(actor.Name),
+			ServerName: strings.TrimSpace(actor.Server),
+			Class:      className,
+		})
+	}
+
+	return participants
 }
 
 // normalizeDifficulty converts WCL difficulty numbers to readable strings
@@ -1245,12 +1335,24 @@ func (c *WCLHTTPClient) getCurrentUserCharacterReports(accessToken string, chara
 									id
 									name
 								}
-								fights {
+								fights(killType: Encounters) {
 									id
 									name
+									startTime
+									endTime
 									encounterID
 									difficulty
 									kill
+									bossPercentage
+									friendlyPlayers
+								}
+								masterData {
+									actors {
+										id
+										name
+										server
+										type
+									}
 								}
 							}
 							current_page

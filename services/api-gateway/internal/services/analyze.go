@@ -37,15 +37,30 @@ type AnalyzeIntakeResponse struct {
 }
 
 type FightSummary struct {
-	ID          int       `json:"id"`
-	Name        string    `json:"name"`
-	Difficulty  string    `json:"difficulty"`
-	Kill        bool      `json:"kill"`
-	KillTime    int       `json:"killTime"`
-	EncounterID int       `json:"encounterId"`
-	StartTime   time.Time `json:"startTime"`
-	EndTime     time.Time `json:"endTime"`
-	BossPercent float64   `json:"bossPercent,omitempty"`
+	ID              int                `json:"id"`
+	Name            string             `json:"name"`
+	Difficulty      string             `json:"difficulty"`
+	Kill            bool               `json:"kill"`
+	KillTime        int                `json:"killTime"`
+	EncounterID     int                `json:"encounterId"`
+	StartTime       time.Time          `json:"startTime"`
+	EndTime         time.Time          `json:"endTime"`
+	BossPercent     float64            `json:"bossPercent,omitempty"`
+	FriendlyPlayers []FightParticipant `json:"friendlyPlayers,omitempty"`
+}
+
+type FightParticipant struct {
+	ID         int    `json:"id"`
+	Name       string `json:"name"`
+	ServerName string `json:"serverName,omitempty"`
+	Class      string `json:"class,omitempty"`
+}
+
+type CharacterFightFilter struct {
+	Name       string
+	ServerName string
+	ServerSlug string
+	ClassName  string
 }
 
 type CharacterSummary struct {
@@ -92,14 +107,15 @@ func (c *LogServiceClient) GetFights(reportID string) ([]FightSummary, error) {
 	}
 
 	var normalizedFights []struct {
-		ID          int       `json:"id"`
-		Name        string    `json:"name"`
-		StartTime   time.Time `json:"startTime"`
-		EndTime     time.Time `json:"endTime"`
-		EncounterID int       `json:"encounterId"`
-		Difficulty  string    `json:"difficulty"`
-		Kill        bool      `json:"kill"`
-		BossPercent float64   `json:"bossPercent"`
+		ID              int                `json:"id"`
+		Name            string             `json:"name"`
+		StartTime       time.Time          `json:"startTime"`
+		EndTime         time.Time          `json:"endTime"`
+		EncounterID     int                `json:"encounterId"`
+		Difficulty      string             `json:"difficulty"`
+		Kill            bool               `json:"kill"`
+		BossPercent     float64            `json:"bossPercent"`
+		FriendlyPlayers []FightParticipant `json:"friendlyPlayers"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&normalizedFights); err != nil {
 		return nil, fmt.Errorf("failed to decode fights response: %w", err)
@@ -110,15 +126,16 @@ func (c *LogServiceClient) GetFights(reportID string) ([]FightSummary, error) {
 		killTime := int(nf.EndTime.Sub(nf.StartTime).Seconds())
 
 		fights[i] = FightSummary{
-			ID:          nf.ID,
-			Name:        nf.Name,
-			Difficulty:  nf.Difficulty,
-			Kill:        nf.Kill,
-			KillTime:    killTime,
-			EncounterID: nf.EncounterID,
-			StartTime:   nf.StartTime,
-			EndTime:     nf.EndTime,
-			BossPercent: nf.BossPercent,
+			ID:              nf.ID,
+			Name:            nf.Name,
+			Difficulty:      nf.Difficulty,
+			Kill:            nf.Kill,
+			KillTime:        killTime,
+			EncounterID:     nf.EncounterID,
+			StartTime:       nf.StartTime,
+			EndTime:         nf.EndTime,
+			BossPercent:     nf.BossPercent,
+			FriendlyPlayers: nf.FriendlyPlayers,
 		}
 	}
 
@@ -219,7 +236,7 @@ func (s *AnalyzeService) ProcessIntake(req AnalyzeIntakeRequest) (AnalyzeIntakeR
 	}, nil
 }
 
-func (s *AnalyzeService) GetFightsForReport(reportID string, preferredFightID int) ([]FightSummary, error) {
+func (s *AnalyzeService) GetFightsForReport(reportID string, preferredFightID int, characterFilter CharacterFightFilter) ([]FightSummary, error) {
 	if strings.TrimSpace(reportID) == "" {
 		return nil, fmt.Errorf("reportId is required")
 	}
@@ -231,9 +248,105 @@ func (s *AnalyzeService) GetFightsForReport(reportID string, preferredFightID in
 	}
 
 	fights = filterRelevantFights(fights)
+	if strings.TrimSpace(characterFilter.Name) != "" {
+		fights = filterFightsForCharacter(fights, characterFilter)
+	}
 	fights = prioritizeFight(fights, preferredFightID)
 
 	return fights, nil
+}
+
+func filterFightsForCharacter(fights []FightSummary, characterFilter CharacterFightFilter) []FightSummary {
+	filtered := make([]FightSummary, 0, len(fights))
+	for _, fight := range fights {
+		if fightIncludesCharacter(fight, characterFilter) {
+			filtered = append(filtered, fight)
+		}
+	}
+	return filtered
+}
+
+func fightIncludesCharacter(fight FightSummary, characterFilter CharacterFightFilter) bool {
+	filterName := normalizeCharacterName(characterFilter.Name)
+	if filterName == "" {
+		return true
+	}
+
+	filterClass := normalizeCharacterKey(characterFilter.ClassName)
+	realmKeys := uniqueStrings([]string{
+		normalizeRealmKey(characterFilter.ServerName),
+		normalizeRealmKey(characterFilter.ServerSlug),
+	})
+
+	for _, player := range fight.FriendlyPlayers {
+		if normalizeCharacterName(player.Name) != filterName {
+			continue
+		}
+
+		playerRealm := normalizeRealmKey(player.ServerName)
+		if playerRealm != "" && len(realmKeys) > 0 && !containsString(realmKeys, playerRealm) {
+			continue
+		}
+
+		playerClass := normalizeCharacterKey(player.Class)
+		if filterClass != "" && !isGenericCharacterClass(playerClass) && playerClass != filterClass {
+			continue
+		}
+
+		return true
+	}
+
+	return false
+}
+
+func isGenericCharacterClass(classKey string) bool {
+	return classKey == "" || classKey == "player" || classKey == "unknown"
+}
+
+func normalizeCharacterName(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
+func normalizeRealmKey(value string) string {
+	return normalizeCharacterKey(value)
+}
+
+func normalizeCharacterKey(value string) string {
+	var builder strings.Builder
+	builder.Grow(len(value))
+
+	for _, r := range strings.ToLower(strings.TrimSpace(value)) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			builder.WriteRune(r)
+		}
+	}
+
+	return builder.String()
+}
+
+func uniqueStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	unique := make([]string, 0, len(values))
+	for _, value := range values {
+		if value == "" {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		unique = append(unique, value)
+	}
+	return unique
+}
+
+func containsString(values []string, needle string) bool {
+	for _, value := range values {
+		if value == needle {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *AnalyzeService) GetCharactersForFight(reportID string, fightID int) ([]CharacterSummary, error) {

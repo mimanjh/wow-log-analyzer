@@ -666,6 +666,53 @@ func mostFrequentClassID(counts map[int]int) (int, bool) {
 	return bestClassID, true
 }
 
+func findCharacterActorID(name, serverName, serverSlug string, actors []WCLActor) int {
+	trimmedName := strings.TrimSpace(name)
+	trimmedServerName := strings.TrimSpace(serverName)
+	trimmedServerSlug := strings.TrimSpace(serverSlug)
+
+	players := make([]WCLActor, 0, len(actors))
+	for _, a := range actors {
+		if strings.EqualFold(strings.TrimSpace(a.Type), "Player") {
+			players = append(players, a)
+		}
+	}
+	if len(players) == 0 {
+		players = actors // fall back to all actors if type field is absent
+	}
+
+	for _, actor := range players {
+		if !strings.EqualFold(strings.TrimSpace(actor.Name), trimmedName) {
+			continue
+		}
+		actorServer := strings.TrimSpace(actor.Server)
+		if trimmedServerName != "" && strings.EqualFold(actorServer, trimmedServerName) {
+			return actor.ID
+		}
+		if trimmedServerSlug != "" && strings.EqualFold(actorServer, trimmedServerSlug) {
+			return actor.ID
+		}
+	}
+	for _, actor := range players {
+		if strings.EqualFold(strings.TrimSpace(actor.Name), trimmedName) {
+			return actor.ID
+		}
+	}
+	return 0
+}
+
+func fightHasActor(fight WCLFight, actorID int) bool {
+	if actorID == 0 {
+		return true
+	}
+	for _, id := range fight.FriendlyPlayers {
+		if id == actorID {
+			return true
+		}
+	}
+	return false
+}
+
 func isAllowedRaidReportTitle(title string) bool {
 	normalized := strings.ToUpper(strings.TrimSpace(title))
 	if normalized == "" {
@@ -865,6 +912,23 @@ func extractSpecName(payload map[string]interface{}) string {
 	return ""
 }
 
+func extractKilledBossNamesFromSummaries(fights []types.CharacterFightSummary) []string {
+	seen := make(map[string]struct{}, len(fights))
+	bossNames := make([]string, 0, len(fights))
+	for _, fight := range fights {
+		name := strings.TrimSpace(fight.Name)
+		if !fight.Kill || name == "" {
+			continue
+		}
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		seen[name] = struct{}{}
+		bossNames = append(bossNames, name)
+	}
+	return bossNames
+}
+
 func extractKilledBossNames(fights []WCLFight) []string {
 	if len(fights) == 0 {
 		return nil
@@ -938,3 +1002,4 @@ func parseCharacterReportsCursor(cursor string) (int, int) {
 func formatCharacterReportsCursor(page, offset int) string {
 	return fmt.Sprintf("%d:%d", page, offset)
 }
+

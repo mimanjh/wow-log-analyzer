@@ -111,7 +111,14 @@ func (h *AnalyzeHandler) HandleFights(w http.ResponseWriter, r *http.Request) {
 		preferredFightID = parsedFightID
 	}
 
-	fights, err := h.analyzeService.GetFightsForReport(reportID, preferredFightID)
+	characterFilter := services.CharacterFightFilter{
+		Name:       r.URL.Query().Get("characterName"),
+		ServerName: r.URL.Query().Get("serverName"),
+		ServerSlug: r.URL.Query().Get("serverSlug"),
+		ClassName:  r.URL.Query().Get("className"),
+	}
+
+	fights, err := h.analyzeService.GetFightsForReport(reportID, preferredFightID, characterFilter)
 	if err != nil {
 		log.Printf("Failed to get fights: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)

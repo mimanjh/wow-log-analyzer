@@ -220,7 +220,7 @@ func TestAnalyzeService_GetFightsForReport(t *testing.T) {
 		},
 	}
 
-	fights, err := service.GetFightsForReport("abc123", 2)
+	fights, err := service.GetFightsForReport("abc123", 2, CharacterFightFilter{})
 	if err != nil {
 		t.Fatalf("GetFightsForReport() error = %v", err)
 	}
@@ -236,5 +236,92 @@ func TestAnalyzeService_GetFightsForReport(t *testing.T) {
 	}
 	if fights[2].ID != 4 {
 		t.Errorf("GetFightsForReport() expected valid wipe fights to remain, got %#v", fights)
+	}
+}
+
+func TestAnalyzeService_GetFightsForReport_FiltersByCharacter(t *testing.T) {
+	service := &AnalyzeService{
+		logClient: &stubLogClient{
+			fights: []FightSummary{
+				{
+					ID:          1,
+					Name:        "Boss One",
+					Difficulty:  "Heroic",
+					Kill:        true,
+					EncounterID: 101,
+					FriendlyPlayers: []FightParticipant{
+						{Name: "Jaicherdk", ServerName: "Tichondrius", Class: "Death Knight"},
+					},
+				},
+				{
+					ID:          2,
+					Name:        "Boss Two",
+					Difficulty:  "Heroic",
+					Kill:        true,
+					EncounterID: 102,
+					FriendlyPlayers: []FightParticipant{
+						{Name: "Otherplayer", ServerName: "Tichondrius", Class: "Druid"},
+					},
+				},
+				{
+					ID:          3,
+					Name:        "Boss Three",
+					Difficulty:  "Heroic",
+					Kill:        true,
+					EncounterID: 103,
+					FriendlyPlayers: []FightParticipant{
+						{Name: "Jaicherdk", ServerName: "tichondrius", Class: "DeathKnight"},
+					},
+				},
+			},
+		},
+	}
+
+	fights, err := service.GetFightsForReport("abc123", 0, CharacterFightFilter{
+		Name:       "Jaicherdk",
+		ServerName: "Tichondrius",
+		ClassName:  "Death Knight",
+	})
+	if err != nil {
+		t.Fatalf("GetFightsForReport() error = %v", err)
+	}
+
+	if len(fights) != 2 {
+		t.Fatalf("GetFightsForReport() expected 2 fights, got %d", len(fights))
+	}
+	if fights[0].ID != 1 || fights[1].ID != 3 {
+		t.Fatalf("GetFightsForReport() returned wrong fights: %#v", fights)
+	}
+}
+
+func TestAnalyzeService_GetFightsForReport_AllowsGenericPlayerClass(t *testing.T) {
+	service := &AnalyzeService{
+		logClient: &stubLogClient{
+			fights: []FightSummary{
+				{
+					ID:          1,
+					Name:        "Boss One",
+					Difficulty:  "Heroic",
+					Kill:        true,
+					EncounterID: 101,
+					FriendlyPlayers: []FightParticipant{
+						{Name: "Jaicherdk", ServerName: "Tichondrius", Class: "Player"},
+					},
+				},
+			},
+		},
+	}
+
+	fights, err := service.GetFightsForReport("abc123", 0, CharacterFightFilter{
+		Name:       "Jaicherdk",
+		ServerName: "Tichondrius",
+		ClassName:  "Death Knight",
+	})
+	if err != nil {
+		t.Fatalf("GetFightsForReport() error = %v", err)
+	}
+
+	if len(fights) != 1 {
+		t.Fatalf("GetFightsForReport() expected 1 fight, got %d", len(fights))
 	}
 }

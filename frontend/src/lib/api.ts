@@ -17,6 +17,13 @@ export interface AnalyzeResponse {
   characters: Character[]
 }
 
+export interface FightCharacterFilter {
+  name: string
+  serverName?: string
+  serverSlug?: string
+  className?: string
+}
+
 export async function analyzeReport(url: string): Promise<AnalyzeResponse> {
   const response = await fetch('/api/analyze/intake', {
     method: 'POST',
@@ -34,13 +41,29 @@ export async function analyzeReport(url: string): Promise<AnalyzeResponse> {
   return response.json()
 }
 
-export async function getFights(reportId: string, preferredFightId?: number | null): Promise<Fight[]> {
+export async function getFights(
+  reportId: string,
+  preferredFightId?: number | null,
+  character?: FightCharacterFilter | null,
+): Promise<Fight[]> {
   const params = new URLSearchParams({
     reportId,
   })
 
   if (preferredFightId) {
     params.set('preferredFightId', String(preferredFightId))
+  }
+  if (character?.name) {
+    params.set('characterName', character.name)
+  }
+  if (character?.serverName) {
+    params.set('serverName', character.serverName)
+  }
+  if (character?.serverSlug) {
+    params.set('serverSlug', character.serverSlug)
+  }
+  if (character?.className) {
+    params.set('className', character.className)
   }
 
   const response = await fetch(`/api/analyze/fights?${params.toString()}`)

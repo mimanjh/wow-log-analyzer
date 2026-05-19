@@ -18,13 +18,23 @@ type BrowserCharacter struct {
 	ServerSlug   string `json:"serverSlug,omitempty"`
 }
 
+type CharacterFightSummary struct {
+	ID          int    `json:"id"`
+	Name        string `json:"name"`
+	Difficulty  string `json:"difficulty"`
+	Kill        bool   `json:"kill"`
+	KillTime    int    `json:"killTime"`
+	EncounterID int    `json:"encounterId"`
+}
+
 type CharacterReportSummary struct {
-	Code      string    `json:"code"`
-	Title     string    `json:"title"`
-	ZoneName  string    `json:"zoneName,omitempty"`
-	BossNames []string  `json:"bossNames,omitempty"`
-	StartTime time.Time `json:"startTime"`
-	EndTime   time.Time `json:"endTime"`
+	Code      string                 `json:"code"`
+	Title     string                 `json:"title"`
+	ZoneName  string                 `json:"zoneName,omitempty"`
+	BossNames []string               `json:"bossNames,omitempty"`
+	StartTime time.Time              `json:"startTime"`
+	EndTime   time.Time              `json:"endTime"`
+	Fights    []CharacterFightSummary `json:"fights,omitempty"`
 }
 
 type CharacterReportsPage struct {
@@ -42,7 +52,7 @@ func NewBrowserService(logServiceURL string) *BrowserService {
 	return &BrowserService{
 		baseURL: logServiceURL,
 		httpClient: &http.Client{
-			Timeout: 60 * time.Second,
+			Timeout: 150 * time.Second,
 		},
 	}
 }
