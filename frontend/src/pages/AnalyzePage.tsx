@@ -26,6 +26,7 @@ export function AnalyzePage() {
     const [creatingFightId, setCreatingFightId] = useState<number | null>(null);
     const [pendingFight, setPendingFight] = useState<{
         reportCode: string;
+        reportStartTime: string;
         fight: NonNullable<(typeof reports)[0]["fights"]>[0];
     } | null>(null);
     const {
@@ -288,7 +289,6 @@ export function AnalyzePage() {
         hasFetchFailedRef.current = false;
         setCollapsedReports(new Set());
         setSelectedCharacter(character);
-        resetReports();
     }
 
     function toggleReportCollapse(code: string) {
@@ -554,6 +554,8 @@ export function AnalyzePage() {
                                                                                         {
                                                                                             reportCode:
                                                                                                 report.code,
+                                                                                            reportStartTime:
+                                                                                                report.startTime,
                                                                                             fight,
                                                                                         },
                                                                                     )
@@ -664,11 +666,11 @@ export function AnalyzePage() {
 
             {pendingFight && (
                 <div
-                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+                    className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-black/60 backdrop-blur-sm"
                     onClick={() => setPendingFight(null)}
                 >
                     <div
-                        className="w-full max-w-sm rounded-3xl border border-slate-700 bg-slate-900 p-6 shadow-2xl"
+                        className="w-full max-w-sm rounded-3xl border border-slate-700 bg-slate-900 p-6 shadow-2xl text-center"
                         onClick={(e) => e.stopPropagation()}
                     >
                         <h2 className="text-lg font-semibold text-white">
@@ -691,6 +693,13 @@ export function AnalyzePage() {
                                 {pendingFight.fight.name}
                             </p>
                             <p className="text-sm text-slate-400">
+                                {(() => {
+                                    const raw = pendingFight.reportStartTime;
+                                    const ms = typeof raw === "number" ? raw : Date.parse(raw);
+                                    return !isNaN(ms)
+                                        ? new Date(ms).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) + " · "
+                                        : null;
+                                })()}
                                 {pendingFight.fight.difficulty} &middot;{" "}
                                 {pendingFight.fight.kill ? "Kill" : "Wipe"}{" "}
                                 &middot;{" "}
@@ -700,7 +709,7 @@ export function AnalyzePage() {
                                     .padStart(2, "0")}
                             </p>
                         </div>
-                        <div className="mt-6 flex gap-3">
+                        <div className="mt-6 flex justify-center gap-3">
                             <Button
                                 onClick={() => {
                                     const { reportCode, fight } = pendingFight;

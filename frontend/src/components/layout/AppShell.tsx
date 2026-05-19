@@ -76,27 +76,6 @@ export function AppShell() {
                         </p>
                     </div>
                     <div className="flex flex-wrap items-center gap-3">
-                        <nav className="flex flex-wrap gap-3">
-                            <Link
-                                to="/"
-                                className="rounded-md bg-slate-800 px-4 py-2 text-sm font-medium text-slate-100 hover:bg-slate-700"
-                            >
-                                Home
-                            </Link>
-                            <Link
-                                to="/analyze"
-                                className="rounded-md bg-slate-800 px-4 py-2 text-sm font-medium text-slate-100 hover:bg-slate-700"
-                            >
-                                Select
-                            </Link>
-                            <Link
-                                to="/report"
-                                className="rounded-md bg-slate-800 px-4 py-2 text-sm font-medium text-slate-100 hover:bg-slate-700"
-                            >
-                                Report
-                            </Link>
-                        </nav>
-
                         {auth?.authenticated ? (
                             <div className="flex items-center gap-3">
                                 {auth.user?.name && (

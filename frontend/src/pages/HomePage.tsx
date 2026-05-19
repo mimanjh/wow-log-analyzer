@@ -45,6 +45,10 @@ export function HomePage() {
                     return;
                 }
 
+                if (characters.length > 0) {
+                    return;
+                }
+
                 setLoadingState("isCharactersLoading", true);
                 const nextCharacters = await getBrowserCharacters();
                 if (cancelled) {
@@ -70,11 +74,27 @@ export function HomePage() {
         };
     }, [
         auth,
+        characters.length,
         finishCharactersLoad,
         setAuth,
         setError,
         setLoadingState,
     ]);
+
+    async function refreshCharacters() {
+        setLoadingState("isCharactersLoading", true);
+        setError(null);
+        try {
+            const nextCharacters = await getBrowserCharacters();
+            finishCharactersLoad(nextCharacters);
+        } catch (err) {
+            setError(
+                err instanceof Error
+                    ? err.message
+                    : "Failed to refresh characters",
+            );
+        }
+    }
 
     function handleCharacterClick(characterId: number) {
         const selected =
@@ -141,9 +161,19 @@ export function HomePage() {
                     </div>
 
                     <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-8">
-                        <h2 className="text-2xl font-semibold text-white">
-                            Your characters
-                        </h2>
+                        <div className="flex items-center justify-between gap-3">
+                            <h2 className="text-2xl font-semibold text-white">
+                                Your characters
+                            </h2>
+                            <Button
+                                type="button"
+                                variant="secondary"
+                                onClick={() => void refreshCharacters()}
+                                disabled={isCharactersLoading}
+                            >
+                                {isCharactersLoading ? "SYNCING..." : "SYNC"}
+                            </Button>
+                        </div>
                         <p className="mt-4 text-slate-300">
                             Pick a character to select from recent logs.
                         </p>

@@ -1,34 +1,29 @@
 export interface AnalyzeState {
   reportUrl: string
-  setReportUrl: (reportUrl: string) => void
   reportId: string | null
-  preferredFightId: number | null
-  fights: Fight[]
-  characters: Character[]
-  charactersFightId: number | null
-  selectedFight: Fight | null
-  selectedCharacter: Character | null
   reportJob: ReportJob | null
   reportResult: ReportResult | null
-  isLoading: boolean
   error: string | null
-  setReportData: (data: { reportId: string | null; preferredFightId?: number | null; fights: Fight[]; characters: Character[] }) => void
-  setFightsForReport: (fights: Fight[]) => void
-  appendFightForReport: (fight: Fight) => void
-  setCharactersForFight: (fightId: number, characters: Character[]) => void
-  setSelectedFight: (fight: Fight | null) => void
-  setSelectedCharacter: (character: Character | null) => void
+  setReportUrl: (reportUrl: string) => void
   setReportJob: (job: ReportJob | null) => void
   setReportResult: (result: ReportResult | null) => void
-  setLoading: (loading: boolean) => void
   setError: (error: string | null) => void
   reset: () => void
 }
 
+export interface CharacterReportsCacheEntry {
+  reports: CharacterReportSummary[]
+  cachedAt: number
+  nextCursor: string | null
+  hasMoreReports: boolean
+}
+
 export interface BrowserState {
   auth: AuthStatus | null
+  authCachedAt: number | null
   characters: BrowserCharacter[]
   selectedCharacter: BrowserCharacter | null
+  reportCacheByCharacter: Record<number, CharacterReportsCacheEntry>
   reports: CharacterReportSummary[]
   reportsCachedAt: number | null
   nextCursor: string | null
