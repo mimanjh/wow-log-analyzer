@@ -900,7 +900,16 @@ func hasSuccessfulBossKill(fights []WCLFight) bool {
 func isRelevantKilledBossFight(fight WCLFight) bool {
 	return fight.Kill &&
 		fight.EncounterID != 0 &&
-		fight.Difficulty != 0
+		isRaidDifficultyID(fight.Difficulty)
+}
+
+func isRaidDifficultyID(difficulty int) bool {
+	switch difficulty {
+	case 1, 2, 3, 4, 5, 17:
+		return true
+	default:
+		return false
+	}
 }
 
 func parseCharacterReportsCursor(cursor string) (int, int) {

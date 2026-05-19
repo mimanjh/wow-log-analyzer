@@ -47,14 +47,38 @@ export function FightSelectPage() {
         setError(null);
 
         getCharacters(reportId, selectedFight.id)
-            .then((nextCharacters) => {
-                setCharactersForFight(selectedFight.id, nextCharacters);
-                setSelectedCharacter(
-                    matchFightCharacter(
-                        browserSelectedCharacter,
-                        nextCharacters,
-                    ),
+            .then(async (nextCharacters) => {
+                const matchedCharacter = matchFightCharacter(
+                    browserSelectedCharacter,
+                    nextCharacters,
                 );
+
+                if (!matchedCharacter && browserSelectedCharacter) {
+                    for (const fight of fights) {
+                        if (fight.id === selectedFight.id) {
+                            continue;
+                        }
+
+                        const fightCharacters = await getCharacters(
+                            reportId,
+                            fight.id,
+                        );
+                        const fallbackCharacter = matchFightCharacter(
+                            browserSelectedCharacter,
+                            fightCharacters,
+                        );
+
+                        if (fallbackCharacter) {
+                            setSelectedFight(fight);
+                            setCharactersForFight(fight.id, fightCharacters);
+                            setSelectedCharacter(fallbackCharacter);
+                            return;
+                        }
+                    }
+                }
+
+                setCharactersForFight(selectedFight.id, nextCharacters);
+                setSelectedCharacter(matchedCharacter);
             })
             .catch((err) => {
                 setError(
@@ -68,8 +92,10 @@ export function FightSelectPage() {
         selectedFight,
         charactersFightId,
         characters.length,
+        fights,
         isLoading,
         setCharactersForFight,
+        setSelectedFight,
         setSelectedCharacter,
         setLoading,
         setError,
@@ -203,31 +229,59 @@ export function FightSelectPage() {
                                 Select a Fight
                             </h2>
                             <div className="mt-4 space-y-2">
-                                {fights.map((fight) => (
-                                    <label
-                                        key={fight.id}
-                                        className="flex items-center space-x-3"
-                                    >
-                                        <input
-                                            type="radio"
-                                            name="fight"
-                                            value={fight.id}
-                                            checked={selectedFight?.id === fight.id}
-                                            onChange={() =>
-                                                setSelectedFight(fight)
-                                            }
-                                            className="text-sky-400 focus:ring-sky-500"
-                                        />
-                                        <span className="text-slate-200">
-                                            {fight.name} ({fight.difficulty},{" "}
-                                            {fight.kill ? "Kill" : "Wipe"}) -{" "}
-                                            {Math.floor(fight.killTime / 60)}:
-                                            {(fight.killTime % 60)
-                                                .toString()
-                                                .padStart(2, "0")}
-                                        </span>
-                                    </label>
-                                ))}
+                                {fights.map((fight) => {
+                                    const isSelected =
+                                        selectedFight?.id === fight.id;
+                                    const rowClasses = fight.kill
+                                        ? "border-emerald-500/50 bg-emerald-950/20 hover:border-emerald-400/70"
+                                        : "border-slate-800 bg-slate-900/50 hover:border-slate-700";
+
+                                    return (
+                                        <label
+                                            key={fight.id}
+                                            className={`flex cursor-pointer items-center gap-3 rounded-2xl border p-4 transition ${rowClasses} ${
+                                                isSelected
+                                                    ? "ring-2 ring-sky-400/70"
+                                                    : ""
+                                            }`}
+                                        >
+                                            <input
+                                                type="radio"
+                                                name="fight"
+                                                value={fight.id}
+                                                checked={isSelected}
+                                                onChange={() =>
+                                                    setSelectedFight(fight)
+                                                }
+                                                className="text-sky-400 focus:ring-sky-500"
+                                            />
+                                            <span className="min-w-0 flex-1">
+                                                <span className="block truncate font-medium text-slate-100">
+                                                    {fight.name}
+                                                </span>
+                                                <span className="mt-1 block text-sm text-slate-400">
+                                                    {fight.difficulty} -{" "}
+                                                    {Math.floor(
+                                                        fight.killTime / 60,
+                                                    )}
+                                                    :
+                                                    {(fight.killTime % 60)
+                                                        .toString()
+                                                        .padStart(2, "0")}
+                                                </span>
+                                            </span>
+                                            <span
+                                                className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold uppercase ${
+                                                    fight.kill
+                                                        ? "bg-emerald-400/15 text-emerald-200 ring-1 ring-emerald-400/40"
+                                                        : "bg-slate-800 text-slate-300 ring-1 ring-slate-700"
+                                                }`}
+                                            >
+                                                {fight.kill ? "Kill" : "Wipe"}
+                                            </span>
+                                        </label>
+                                    );
+                                })}
                             </div>
                         </div>
 

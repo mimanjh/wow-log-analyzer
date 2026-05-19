@@ -336,6 +336,28 @@ func findResourceEvent(events []types.ResourceEvent, resourceTypeID int) (types.
 	return types.ResourceEvent{}, false
 }
 
+func TestIsRelevantKilledBossFight_RequiresRaidDifficulty(t *testing.T) {
+	raidFight := WCLFight{
+		Name:        "Raid Boss",
+		EncounterID: 3009,
+		Difficulty:  4,
+		Kill:        true,
+	}
+	if !isRelevantKilledBossFight(raidFight) {
+		t.Fatalf("expected heroic raid kill to be relevant")
+	}
+
+	mythicPlusFight := WCLFight{
+		Name:        "Dungeon Boss",
+		EncounterID: 2677,
+		Difficulty:  10,
+		Kill:        true,
+	}
+	if isRelevantKilledBossFight(mythicPlusFight) {
+		t.Fatalf("expected mythic plus kill to be filtered out")
+	}
+}
+
 func TestDeriveCharacterClassIDFromRecentReports_UsesExactCanonicalIDMatch(t *testing.T) {
 	character := WCLUserCharacter{
 		CanonicalID: 12345,
