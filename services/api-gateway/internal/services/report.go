@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"wow-log-analyzer/services/api-gateway/internal/config"
 )
 
 type GenerateReportRequest struct {
@@ -327,13 +329,14 @@ type insightGenerationRequest struct {
 }
 
 type insightContext struct {
-	EncounterName    string `json:"encounterName"`
-	Difficulty       string `json:"difficulty"`
-	CharacterName    string `json:"characterName"`
-	CharacterClass   string `json:"characterClass"`
-	CharacterSpec    string `json:"characterSpec"`
-	FightDurationSec int    `json:"fightDurationSec"`
-	CohortSize       int    `json:"cohortSize"`
+	EncounterName    string             `json:"encounterName"`
+	Difficulty       string             `json:"difficulty"`
+	CharacterName    string             `json:"characterName"`
+	CharacterClass   string             `json:"characterClass"`
+	CharacterSpec    string             `json:"characterSpec"`
+	FightDurationSec int                `json:"fightDurationSec"`
+	CohortSize       int                `json:"cohortSize"`
+	SpecProfile      config.SpecProfile `json:"specProfile,omitempty"`
 }
 
 type insightMetric struct {
@@ -1107,6 +1110,7 @@ func (s *ReportService) postForJSON(ctx context.Context, client *http.Client, en
 }
 
 func buildInsightRequest(req GenerateReportRequest, comparison ComparisonResult, playerData timelineFightData, eliteData []timelineFightData) insightGenerationRequest {
+	specProfile, _ := config.SpecProfileFor(req.Character.Class, req.Character.Spec)
 	return insightGenerationRequest{
 		Context: insightContext{
 			EncounterName:    req.Fight.Name,
@@ -1116,6 +1120,7 @@ func buildInsightRequest(req GenerateReportRequest, comparison ComparisonResult,
 			CharacterSpec:    req.Character.Spec,
 			FightDurationSec: req.Fight.KillTime,
 			CohortSize:       comparison.CohortStats.SampleSize,
+			SpecProfile:      specProfile,
 		},
 		Metrics:            nil,
 		AbilityHighlights:  buildAbilityHighlights(comparison.AbilityUsage, 5, req.Character.Class, req.Character.Spec, playerData, eliteData),

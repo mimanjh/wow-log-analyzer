@@ -142,6 +142,45 @@ func TestBuildPromptExcludesRawLogReferences(t *testing.T) {
 	}
 }
 
+func TestBuildPromptIncludesSpecProfileContext(t *testing.T) {
+	req := validRequest()
+	req.Context.CharacterClass = "Death Knight"
+	req.Context.CharacterSpec = "Blood"
+	req.Context.SpecProfile = types.SpecProfile{
+		Label:          "Blood Death Knight",
+		Role:           "Tank",
+		StatPriorities: []string{"Haste", "Mastery"},
+		KeyMechanics: []string{
+			"Build and spend Runic Power deliberately.",
+			"Manage rune availability so core spenders are not delayed.",
+		},
+		Rotation: []types.SpecGuideSection{
+			{
+				Context:    "Single Target",
+				HeroTalent: "Deathbringer",
+				Steps: []types.SpecGuideStep{
+					{Text: "Use spell 206930 to build Runic Power without running out of runes.", SpellIDs: []string{"206930"}},
+					{Text: "Use spell 49998 for self-healing when needed.", SpellIDs: []string{"49998"}},
+				},
+			},
+		},
+	}
+
+	prompt := buildPrompt(req)
+	if !strings.Contains(prompt, "Spec guide context:") {
+		t.Fatal("expected spec guide context section")
+	}
+	if !strings.Contains(prompt, "Blood Death Knight") {
+		t.Fatal("expected spec label in prompt")
+	}
+	if !strings.Contains(prompt, "Use spec guide context only to explain why a deterministic gap matters") {
+		t.Fatal("expected prompt guardrail for spec context")
+	}
+	if !strings.Contains(prompt, "Runic Power") || !strings.Contains(strings.ToLower(prompt), "runes") {
+		t.Fatal("expected Blood DK resource context in prompt")
+	}
+}
+
 func TestNewModelClientRequiresLiveOpenAIConfig(t *testing.T) {
 	disabled := newModelClient(config.Config{
 		Provider:         "openai",

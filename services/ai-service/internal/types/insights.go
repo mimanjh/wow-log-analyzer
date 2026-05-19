@@ -9,13 +9,35 @@ type InsightGenerationRequest struct {
 }
 
 type InsightContext struct {
-	EncounterName    string `json:"encounterName"`
-	Difficulty       string `json:"difficulty"`
-	CharacterName    string `json:"characterName"`
-	CharacterClass   string `json:"characterClass"`
-	CharacterSpec    string `json:"characterSpec"`
-	FightDurationSec int    `json:"fightDurationSec"`
-	CohortSize       int    `json:"cohortSize"`
+	EncounterName    string      `json:"encounterName"`
+	Difficulty       string      `json:"difficulty"`
+	CharacterName    string      `json:"characterName"`
+	CharacterClass   string      `json:"characterClass"`
+	CharacterSpec    string      `json:"characterSpec"`
+	FightDurationSec int         `json:"fightDurationSec"`
+	CohortSize       int         `json:"cohortSize"`
+	SpecProfile      SpecProfile `json:"specProfile,omitempty"`
+}
+
+type SpecProfile struct {
+	Label          string             `json:"label,omitempty"`
+	SourceURL      string             `json:"sourceUrl,omitempty"`
+	Role           string             `json:"role,omitempty"`
+	StatPriorities []string           `json:"statPriorities,omitempty"`
+	KeyMechanics   []string           `json:"keyMechanics,omitempty"`
+	Rotation       []SpecGuideSection `json:"rotation,omitempty"`
+	Opener         []SpecGuideSection `json:"opener,omitempty"`
+}
+
+type SpecGuideSection struct {
+	Context    string          `json:"context,omitempty"`
+	HeroTalent string          `json:"heroTalent,omitempty"`
+	Steps      []SpecGuideStep `json:"steps,omitempty"`
+}
+
+type SpecGuideStep struct {
+	Text     string   `json:"text"`
+	SpellIDs []string `json:"spellIds,omitempty"`
 }
 
 type InsightMetric struct {

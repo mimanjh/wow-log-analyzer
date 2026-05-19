@@ -547,7 +547,7 @@ func buildPrompt(req types.InsightGenerationRequest) string {
 
 	sections := []string{
 		fmt.Sprintf(
-			"Generate exactly 3 concise cautious insights and 1 focus recommendation for %s %s %s on %s %s. Use only these deterministic comparison outputs, especially the ability and buff comparisons against elite logs on the same boss. Prioritize timing, usage gaps, late windows, missing buttons, and clear strengths. Do not mention raw logs or invent causality.",
+			"Generate exactly 3 concise cautious insights and 1 focus recommendation for %s %s %s on %s %s. Use only these deterministic comparison outputs, especially the ability and buff comparisons against elite logs on the same boss. Use spec guide context only to explain why a deterministic gap matters for the selected spec; do not use it as evidence that the player made a mistake. Prioritize timing, usage gaps, late windows, missing buttons, and clear strengths. Do not mention raw logs or invent causality.",
 			req.Context.CharacterSpec,
 			req.Context.CharacterClass,
 			req.Context.CharacterName,
@@ -559,6 +559,9 @@ func buildPrompt(req types.InsightGenerationRequest) string {
 			req.Context.FightDurationSec,
 			req.Context.CohortSize,
 		),
+	}
+	if specContext := formatSpecProfile(req.Context.SpecProfile); specContext != "" {
+		sections = append(sections, "Spec guide context:\n"+specContext)
 	}
 
 	if len(abilityLines) > 0 {
@@ -575,6 +578,58 @@ func buildPrompt(req types.InsightGenerationRequest) string {
 	}
 
 	return strings.Join(sections, "\n\n")
+}
+
+func formatSpecProfile(profile types.SpecProfile) string {
+	if strings.TrimSpace(profile.Label) == "" {
+		return ""
+	}
+
+	lines := []string{fmt.Sprintf("- Spec: %s", profile.Label)}
+	if profile.Role != "" {
+		lines = append(lines, fmt.Sprintf("- Role: %s", profile.Role))
+	}
+	if len(profile.StatPriorities) > 0 {
+		lines = append(lines, fmt.Sprintf("- Stat priority context: %s", strings.Join(profile.StatPriorities, " > ")))
+	}
+	if len(profile.KeyMechanics) > 0 {
+		lines = append(lines, "- Key mechanics: "+strings.Join(profile.KeyMechanics, " "))
+	}
+	if len(profile.Rotation) > 0 {
+		lines = append(lines, "- Rotation context:")
+		lines = append(lines, formatSpecGuideSections(profile.Rotation, 5)...)
+	}
+	if len(profile.Opener) > 0 {
+		lines = append(lines, "- Opener context:")
+		lines = append(lines, formatSpecGuideSections(profile.Opener, 4)...)
+	}
+	if profile.SourceURL != "" {
+		lines = append(lines, fmt.Sprintf("- Guide source: %s", profile.SourceURL))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func formatSpecGuideSections(sections []types.SpecGuideSection, stepLimit int) []string {
+	lines := make([]string, 0)
+	for _, section := range sections {
+		header := strings.TrimSpace(section.Context)
+		if section.HeroTalent != "" {
+			header = strings.TrimSpace(header + " / " + section.HeroTalent)
+		}
+		if header != "" {
+			lines = append(lines, fmt.Sprintf("  - %s", header))
+		}
+		for index, step := range section.Steps {
+			if index == stepLimit {
+				break
+			}
+			if strings.TrimSpace(step.Text) == "" {
+				continue
+			}
+			lines = append(lines, fmt.Sprintf("    %d. %s", index+1, step.Text))
+		}
+	}
+	return lines
 }
 
 func formatResourceHighlightLine(highlight types.InsightHighlight) string {
