@@ -7,7 +7,7 @@ import { Button } from "../components/ui/Button";
 import { createReportJob, getCharacters, getFights } from "../lib/api";
 import { matchFightCharacter } from "../lib/characterMatching";
 import { getCharacterCardClasses } from "../lib/characterPresentation";
-import type { Character } from "../types";
+import type { Character, Fight } from "../types";
 
 const FIGHT_DISCOVERY_BATCH_SIZE = 10;
 
@@ -264,6 +264,67 @@ export function FightSelectPage() {
         setSelectedCharacter,
     ]);
 
+    function getFightGroups() {
+        const groups: Array<{ bossName: string; fights: Fight[] }> = [];
+        const groupByBossName = new Map<string, Fight[]>();
+
+        for (const fight of fights) {
+            const bossName = fight.name.trim() || "Unknown encounter";
+            const group = groupByBossName.get(bossName);
+            if (group) {
+                group.push(fight);
+                continue;
+            }
+
+            const nextGroup = [fight];
+            groupByBossName.set(bossName, nextGroup);
+            groups.push({ bossName, fights: nextGroup });
+        }
+
+        return groups;
+    }
+
+    function renderFightOption(fight: Fight) {
+        const isSelected = selectedFight?.id === fight.id;
+        const rowClasses = fight.kill
+            ? "border-emerald-500/50 bg-emerald-950/20 hover:border-emerald-400/70"
+            : "border-slate-800 bg-slate-900/50 hover:border-slate-700";
+
+        return (
+            <label
+                key={fight.id}
+                className={`flex min-h-24 cursor-pointer items-center gap-3 rounded-2xl border p-4 transition ${rowClasses} ${
+                    isSelected ? "ring-2 ring-sky-400/70" : ""
+                }`}
+            >
+                <input
+                    type="radio"
+                    name="fight"
+                    value={fight.id}
+                    checked={isSelected}
+                    onChange={() => setSelectedFight(fight)}
+                    className="sr-only"
+                />
+                <span className="w-5 shrink-0" aria-hidden="true" />
+                <span className="min-w-0 flex-1">
+                    <span className="mt-1 block text-sm text-slate-400">
+                        {fight.difficulty} - {Math.floor(fight.killTime / 60)}:
+                        {(fight.killTime % 60).toString().padStart(2, "0")}
+                    </span>
+                </span>
+                <span
+                    className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold uppercase ${
+                        fight.kill
+                            ? "bg-emerald-400/15 text-emerald-200 ring-1 ring-emerald-400/40"
+                            : "bg-slate-800 text-slate-300 ring-1 ring-slate-700"
+                    }`}
+                >
+                    {fight.kill ? "Kill" : "Wipe"}
+                </span>
+            </label>
+        );
+    }
+
     async function handleAnalyzeClick() {
         if (!reportId || !selectedFight || !selectedCharacter) {
             return;
@@ -372,63 +433,27 @@ export function FightSelectPage() {
                                 </p>
                             )}
                             <div className="mt-4 space-y-2">
-                                {fights.map((fight) => {
-                                    const isSelected =
-                                        selectedFight?.id === fight.id;
-                                    const rowClasses = fight.kill
-                                        ? "border-emerald-500/50 bg-emerald-950/20 hover:border-emerald-400/70"
-                                        : "border-slate-800 bg-slate-900/50 hover:border-slate-700";
-
-                                    return (
-                                        <label
-                                            key={fight.id}
-                                            className={`flex cursor-pointer items-center gap-3 rounded-2xl border p-4 transition ${rowClasses} ${
-                                                isSelected
-                                                    ? "ring-2 ring-sky-400/70"
-                                                    : ""
-                                            }`}
-                                        >
-                                            <input
-                                                type="radio"
-                                                name="fight"
-                                                value={fight.id}
-                                                checked={isSelected}
-                                                onChange={() =>
-                                                    setSelectedFight(fight)
-                                                }
-                                                className="sr-only"
-                                            />
-                                            <span
-                                                className="w-5 shrink-0"
-                                                aria-hidden="true"
-                                            />
-                                            <span className="min-w-0 flex-1">
-                                                <span className="block truncate font-medium text-slate-100">
-                                                    {fight.name}
-                                                </span>
-                                                <span className="mt-1 block text-sm text-slate-400">
-                                                    {fight.difficulty} -{" "}
-                                                    {Math.floor(
-                                                        fight.killTime / 60,
-                                                    )}
-                                                    :
-                                                    {(fight.killTime % 60)
-                                                        .toString()
-                                                        .padStart(2, "0")}
-                                                </span>
-                                            </span>
-                                            <span
-                                                className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold uppercase ${
-                                                    fight.kill
-                                                        ? "bg-emerald-400/15 text-emerald-200 ring-1 ring-emerald-400/40"
-                                                        : "bg-slate-800 text-slate-300 ring-1 ring-slate-700"
-                                                }`}
-                                            >
-                                                {fight.kill ? "Kill" : "Wipe"}
-                                            </span>
-                                        </label>
-                                    );
-                                })}
+                                {getFightGroups().map((group, index) => (
+                                    <div
+                                        key={group.bossName}
+                                        className={`space-y-3 ${
+                                            index > 0
+                                                ? "border-t border-slate-800 pt-4"
+                                                : ""
+                                        }`}
+                                    >
+                                        <h3 className="text-base font-semibold text-slate-100">
+                                            {group.bossName}
+                                        </h3>
+                                        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                                            {group.fights
+                                                .slice(0, 4)
+                                                .map((fight) =>
+                                                    renderFightOption(fight),
+                                                )}
+                                        </div>
+                                    </div>
+                                ))}
                                 {!isDiscoveringFights && fights.length === 0 && (
                                     <p className="text-sm text-slate-400">
                                         No fights for the selected character were
