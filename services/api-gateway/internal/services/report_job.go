@@ -1,12 +1,22 @@
 package services
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/redis/go-redis/v9"
+)
+
+const (
+	jobRedisKeyPrefix = "report:job:"
+	jobRedisTTL       = 30 * 24 * time.Hour
 )
 
 type ReportService struct {
@@ -17,8 +27,9 @@ type ReportService struct {
 	analysisURL    string
 	aiURL          string
 
-	jobMu sync.RWMutex
-	jobs  map[string]ReportJob
+	jobMu      sync.RWMutex
+	jobs       map[string]ReportJob
+	redisClient *redis.Client
 }
 
 const (
@@ -27,7 +38,7 @@ const (
 	rankingCandidateMaxCap   = 100
 )
 
-func NewReportService(logURL, analysisURL, aiURL string) *ReportService {
+func NewReportService(logURL, analysisURL, aiURL string, redisClient *redis.Client) *ReportService {
 	const serviceTimeout = 120 * time.Second
 
 	return &ReportService{
@@ -38,6 +49,7 @@ func NewReportService(logURL, analysisURL, aiURL string) *ReportService {
 		analysisURL:    analysisURL,
 		aiURL:          aiURL,
 		jobs:           make(map[string]ReportJob),
+		redisClient:    redisClient,
 	}
 }
 
@@ -73,14 +85,37 @@ func (s *ReportService) CreateJob(req GenerateReportRequest) (ReportJob, error) 
 
 func (s *ReportService) GetJob(jobID string) (ReportJob, error) {
 	s.jobMu.RLock()
-	defer s.jobMu.RUnlock()
-
 	job, ok := s.jobs[jobID]
-	if !ok {
-		return ReportJob{}, fmt.Errorf("report job %s not found", jobID)
+	s.jobMu.RUnlock()
+	if ok {
+		return job, nil
 	}
 
-	return job, nil
+	if s.redisClient != nil {
+		data, err := s.redisClient.Get(context.Background(), jobRedisKeyPrefix+jobID).Bytes()
+		if err == nil {
+			var cached ReportJob
+			if err := json.Unmarshal(data, &cached); err == nil {
+				return cached, nil
+			}
+		}
+	}
+
+	return ReportJob{}, fmt.Errorf("report job %s not found", jobID)
+}
+
+func (s *ReportService) persistJobToRedis(job ReportJob) {
+	if s.redisClient == nil {
+		return
+	}
+	data, err := json.Marshal(job)
+	if err != nil {
+		log.Printf("Failed to marshal job %s for Redis: %v", job.ID, err)
+		return
+	}
+	if err := s.redisClient.Set(context.Background(), jobRedisKeyPrefix+job.ID, data, jobRedisTTL).Err(); err != nil {
+		log.Printf("Failed to persist job %s to Redis: %v", job.ID, err)
+	}
 }
 
 func (s *ReportService) setJob(job ReportJob) {
@@ -104,10 +139,9 @@ func (s *ReportService) setTimeline(jobID string, timeline *reportTimelineData) 
 
 func (s *ReportService) updateJob(jobID string, status ReportJobStatus, stage, message string, progress ReportJobProgress, errText string, result *GenerateReportResponse) {
 	s.jobMu.Lock()
-	defer s.jobMu.Unlock()
-
 	job, ok := s.jobs[jobID]
 	if !ok {
+		s.jobMu.Unlock()
 		return
 	}
 
@@ -119,6 +153,11 @@ func (s *ReportService) updateJob(jobID string, status ReportJobStatus, stage, m
 	job.Result = result
 	job.UpdatedAt = time.Now().UTC()
 	s.jobs[jobID] = job
+	s.jobMu.Unlock()
+
+	if status == ReportJobCompleted || status == ReportJobFailed {
+		go s.persistJobToRedis(job)
+	}
 }
 
 func newJobID() string {
