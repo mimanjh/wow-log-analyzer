@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -12,10 +13,11 @@ import (
 
 type ReportHandler struct {
 	reportService *services.ReportService
+	authService   *services.AuthService
 }
 
-func NewReportHandler(reportService *services.ReportService) *ReportHandler {
-	return &ReportHandler{reportService: reportService}
+func NewReportHandler(reportService *services.ReportService, authService *services.AuthService) *ReportHandler {
+	return &ReportHandler{reportService: reportService, authService: authService}
 }
 
 func (h *ReportHandler) CreateJob(w http.ResponseWriter, r *http.Request) {
@@ -31,6 +33,21 @@ func (h *ReportHandler) CreateJob(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Failed to decode report request: %v", err)
 		http.Error(w, "Invalid JSON request body", http.StatusBadRequest)
 		return
+	}
+
+	// Enforce daily usage limit for authenticated users, but skip if result is already cached.
+	if cookie, err := r.Cookie("wowlog_session"); err == nil {
+		if session, ok := h.authService.GetSession(cookie.Value); ok && session.User != nil {
+			if !h.reportService.HasCachedResult(req) {
+				allowed, _, usageErr := h.reportService.CheckAndIncrementDailyUsage(r.Context(), session.User.ID)
+				if usageErr != nil {
+					log.Printf("Usage check failed for user %d: %v", session.User.ID, usageErr)
+				} else if !allowed {
+					http.Error(w, fmt.Sprintf("Daily analysis limit of %d reached. Try again tomorrow.", services.DailyAnalysisLimit), http.StatusTooManyRequests)
+					return
+				}
+			}
+		}
 	}
 
 	response, err := h.reportService.CreateJob(req)

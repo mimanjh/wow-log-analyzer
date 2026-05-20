@@ -10,7 +10,7 @@ import (
 
 func RegisterRoutes(mux *http.ServeMux, cfg config.Config, analyzeService *services.AnalyzeService, reportService *services.ReportService, authService *services.AuthService, browserService *services.BrowserService) {
 	analyzeHandler := NewAnalyzeHandler(analyzeService)
-	reportHandler := NewReportHandler(reportService)
+	reportHandler := NewReportHandler(reportService, authService)
 	authHandler := NewAuthHandler(authService, browserService, cfg)
 	browserHandler := NewBrowserHandler(authService, browserService)
 

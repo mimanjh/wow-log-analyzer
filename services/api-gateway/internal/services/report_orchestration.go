@@ -12,11 +12,37 @@ import (
 	"wow-log-analyzer/services/api-gateway/internal/config"
 )
 
+func (s *ReportService) getOrFetchPlayerData(ctx context.Context, req GenerateReportRequest) (json.RawMessage, error) {
+	key := fmt.Sprintf("%s%s:%d:%d", playerDataCacheKeyPrefix, req.ReportID, req.Fight.ID, req.Character.ID)
+	if data, ok := s.getCachedRaw(ctx, key); ok {
+		return data, nil
+	}
+	data, err := s.fetchPlayerData(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	s.setCachedRaw(ctx, key, data, playerDataCacheTTL)
+	return data, nil
+}
+
+func (s *ReportService) getOrFetchCohortMember(ctx context.Context, candidate RankingCandidate) (json.RawMessage, error) {
+	key := cohortMemberCacheKeyPrefix + rankingCandidateKey(candidate)
+	if data, ok := s.getCachedRaw(ctx, key); ok {
+		return data, nil
+	}
+	data, err := s.fetchCohortMember(ctx, candidate)
+	if err != nil {
+		return nil, err
+	}
+	s.setCachedRaw(ctx, key, data, cohortMemberCacheTTL)
+	return data, nil
+}
+
 func (s *ReportService) runJob(jobID string, req GenerateReportRequest) {
 	ctx := context.Background()
 
 	s.updateJob(jobID, ReportJobRunning, "player-data", "Fetching selected player fight data.", ReportJobProgress{Current: 1, Total: 5}, "", nil)
-	playerData, err := s.fetchPlayerData(ctx, req)
+	playerData, err := s.getOrFetchPlayerData(ctx, req)
 	if err != nil {
 		s.updateJob(jobID, ReportJobFailed, "player-data", "Failed to fetch selected player fight data.", ReportJobProgress{Current: 1, Total: 5}, err.Error(), nil)
 		return
@@ -53,7 +79,7 @@ func (s *ReportService) runJob(jobID string, req GenerateReportRequest) {
 			newCandidates++
 
 			s.updateJob(jobID, ReportJobRunning, "cohort", fmt.Sprintf("Fetching cohort member %d of %d.", len(cohortData)+1, targetEliteCount), ReportJobProgress{Current: len(cohortData) + 1, Total: targetEliteCount}, "", nil)
-			memberData, err := s.fetchCohortMember(ctx, candidate)
+			memberData, err := s.getOrFetchCohortMember(ctx, candidate)
 			if err != nil {
 				continue
 			}
@@ -111,6 +137,7 @@ func (s *ReportService) runJob(jobID string, req GenerateReportRequest) {
 	if err != nil {
 		fmt.Printf("AI insights unavailable for job %s: %v\n", jobID, err)
 		response.AI.Warning = "AI insights were unavailable. Deterministic metrics are still shown."
+		go s.setCachedResult(req, response)
 		s.updateJob(jobID, ReportJobCompleted, "completed", "Report completed without AI insights.", ReportJobProgress{Current: 5, Total: 5}, "", &response)
 		return
 	}
@@ -126,6 +153,7 @@ func (s *ReportService) runJob(jobID string, req GenerateReportRequest) {
 		response.AI.Warning = firstNonEmpty(insights.Warning, "AI used the deterministic fallback formatter for this report.")
 	}
 
+	go s.setCachedResult(req, response)
 	s.updateJob(jobID, ReportJobCompleted, "completed", "Report completed.", ReportJobProgress{Current: 5, Total: 5}, "", &response)
 }
 

@@ -32,7 +32,7 @@ func (h *BrowserHandler) GetCharacters(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	characters, err := h.browserService.GetCharacters(session.AccessToken)
+	characters, err := h.browserService.GetCharacters(session.AccessToken, cookie.Value)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
@@ -63,6 +63,7 @@ func (h *BrowserHandler) GetCharacterReports(w http.ResponseWriter, r *http.Requ
 
 	page, err := h.browserService.GetCharacterReports(
 		session.AccessToken,
+		cookie.Value,
 		characterID,
 		r.URL.Query().Get("cursor"),
 		parseBrowserLimit(r.URL.Query().Get("limit"), 10),

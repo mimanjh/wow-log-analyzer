@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +12,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/redis/go-redis/v9"
 )
 
 var (
@@ -164,12 +167,14 @@ func (c *LogServiceClient) GetCharacters(reportID string, fightID int) ([]Charac
 }
 
 type AnalyzeService struct {
-	logClient logDataClient
+	logClient   logDataClient
+	redisClient *redis.Client
 }
 
-func NewAnalyzeService(logServiceURL string) *AnalyzeService {
+func NewAnalyzeService(logServiceURL string, redisClient *redis.Client) *AnalyzeService {
 	return &AnalyzeService{
-		logClient: NewLogServiceClient(logServiceURL),
+		logClient:   NewLogServiceClient(logServiceURL),
+		redisClient: redisClient,
 	}
 }
 
@@ -241,7 +246,7 @@ func (s *AnalyzeService) GetFightsForReport(reportID string, preferredFightID in
 		return nil, fmt.Errorf("reportId is required")
 	}
 
-	fights, err := s.logClient.GetFights(reportID)
+	fights, err := s.cachedFights(reportID)
 	if err != nil {
 		log.Printf("Failed to get fights from log-service: %v", err)
 		return nil, fmt.Errorf("failed to retrieve fights: %w", err)
@@ -357,12 +362,58 @@ func (s *AnalyzeService) GetCharactersForFight(reportID string, fightID int) ([]
 		return nil, fmt.Errorf("fightId is required")
 	}
 
-	characters, err := s.logClient.GetCharacters(reportID, fightID)
+	characters, err := s.cachedCharacters(reportID, fightID)
 	if err != nil {
 		log.Printf("Failed to get characters from log-service: %v", err)
 		return nil, fmt.Errorf("failed to retrieve characters: %w", err)
 	}
 
+	return characters, nil
+}
+
+func (s *AnalyzeService) cachedFights(reportID string) ([]FightSummary, error) {
+	const ttl = 30 * 24 * time.Hour
+	key := "report:fights:" + reportID
+	if s.redisClient != nil {
+		if data, err := s.redisClient.Get(context.Background(), key).Bytes(); err == nil {
+			var fights []FightSummary
+			if json.Unmarshal(data, &fights) == nil {
+				return fights, nil
+			}
+		}
+	}
+	fights, err := s.logClient.GetFights(reportID)
+	if err != nil {
+		return nil, err
+	}
+	if s.redisClient != nil {
+		if data, err := json.Marshal(fights); err == nil {
+			s.redisClient.Set(context.Background(), key, data, ttl)
+		}
+	}
+	return fights, nil
+}
+
+func (s *AnalyzeService) cachedCharacters(reportID string, fightID int) ([]CharacterSummary, error) {
+	const ttl = 30 * 24 * time.Hour
+	key := fmt.Sprintf("report:characters:%s:%d", reportID, fightID)
+	if s.redisClient != nil {
+		if data, err := s.redisClient.Get(context.Background(), key).Bytes(); err == nil {
+			var characters []CharacterSummary
+			if json.Unmarshal(data, &characters) == nil {
+				return characters, nil
+			}
+		}
+	}
+	characters, err := s.logClient.GetCharacters(reportID, fightID)
+	if err != nil {
+		return nil, err
+	}
+	if s.redisClient != nil {
+		if data, err := json.Marshal(characters); err == nil {
+			s.redisClient.Set(context.Background(), key, data, ttl)
+		}
+	}
 	return characters, nil
 }
 

@@ -1,12 +1,20 @@
 package services
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/redis/go-redis/v9"
+)
+
+const (
+	browserCharactersCacheTTL = 5 * time.Minute
+	browserReportsCacheTTL    = 5 * time.Minute
 )
 
 type BrowserCharacter struct {
@@ -44,16 +52,16 @@ type CharacterReportsPage struct {
 }
 
 type BrowserService struct {
-	baseURL    string
-	httpClient *http.Client
+	baseURL     string
+	httpClient  *http.Client
+	redisClient *redis.Client
 }
 
-func NewBrowserService(logServiceURL string) *BrowserService {
+func NewBrowserService(logServiceURL string, redisClient *redis.Client) *BrowserService {
 	return &BrowserService{
-		baseURL: logServiceURL,
-		httpClient: &http.Client{
-			Timeout: 150 * time.Second,
-		},
+		baseURL:     logServiceURL,
+		httpClient:  &http.Client{Timeout: 150 * time.Second},
+		redisClient: redisClient,
 	}
 }
 
@@ -83,7 +91,17 @@ func (s *BrowserService) GetCurrentUser(accessToken string) (*AuthUser, error) {
 	return &user, nil
 }
 
-func (s *BrowserService) GetCharacters(accessToken string) ([]BrowserCharacter, error) {
+func (s *BrowserService) GetCharacters(accessToken, sessionID string) ([]BrowserCharacter, error) {
+	cacheKey := "browser:characters:" + sessionID
+	if s.redisClient != nil && sessionID != "" {
+		if data, err := s.redisClient.Get(context.Background(), cacheKey).Bytes(); err == nil {
+			var cached []BrowserCharacter
+			if json.Unmarshal(data, &cached) == nil {
+				return cached, nil
+			}
+		}
+	}
+
 	req, err := http.NewRequest(http.MethodGet, s.baseURL+"/user/characters", nil)
 	if err != nil {
 		return nil, err
@@ -106,15 +124,31 @@ func (s *BrowserService) GetCharacters(accessToken string) ([]BrowserCharacter, 
 		return nil, err
 	}
 
+	if s.redisClient != nil && sessionID != "" {
+		if data, err := json.Marshal(characters); err == nil {
+			s.redisClient.Set(context.Background(), cacheKey, data, browserCharactersCacheTTL)
+		}
+	}
+
 	return characters, nil
 }
 
-func (s *BrowserService) GetCharacterReports(accessToken string, characterID int, cursor string, limit int) (*CharacterReportsPage, error) {
+func (s *BrowserService) GetCharacterReports(accessToken, sessionID string, characterID int, cursor string, limit int) (*CharacterReportsPage, error) {
 	if characterID == 0 {
 		return nil, fmt.Errorf("characterId is required")
 	}
 	if limit <= 0 {
 		limit = 10
+	}
+
+	cacheKey := fmt.Sprintf("browser:reports:%s:%d:%s:%d", sessionID, characterID, cursor, limit)
+	if s.redisClient != nil && sessionID != "" {
+		if data, err := s.redisClient.Get(context.Background(), cacheKey).Bytes(); err == nil {
+			var cached CharacterReportsPage
+			if json.Unmarshal(data, &cached) == nil {
+				return &cached, nil
+			}
+		}
 	}
 
 	url := fmt.Sprintf("%s/user/characters/%d/reports?limit=%d", s.baseURL, characterID, limit)
@@ -142,6 +176,12 @@ func (s *BrowserService) GetCharacterReports(accessToken string, characterID int
 	var page CharacterReportsPage
 	if err := json.NewDecoder(resp.Body).Decode(&page); err != nil {
 		return nil, err
+	}
+
+	if s.redisClient != nil && sessionID != "" {
+		if data, err := json.Marshal(page); err == nil {
+			s.redisClient.Set(context.Background(), cacheKey, data, browserReportsCacheTTL)
+		}
 	}
 
 	return &page, nil

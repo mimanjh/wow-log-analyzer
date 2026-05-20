@@ -2,18 +2,23 @@ package services
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"sync"
 	"time"
 
+	"github.com/redis/go-redis/v9"
 	"wow-log-analyzer/services/api-gateway/internal/config"
 )
+
+const sessionRedisKeyPrefix = "session:"
 
 const sessionCookieName = "wowlog_session"
 
@@ -46,14 +51,16 @@ type AuthService struct {
 	mu            sync.RWMutex
 	sessions      map[string]sessionState
 	pendingStates map[string]pendingOAuthState
+	redisClient   *redis.Client
 }
 
-func NewAuthService(cfg config.Config) *AuthService {
+func NewAuthService(cfg config.Config, redisClient *redis.Client) *AuthService {
 	return &AuthService{
 		cfg:           cfg,
 		httpClient:    &http.Client{Timeout: 30 * time.Second},
 		sessions:      make(map[string]sessionState),
 		pendingStates: make(map[string]pendingOAuthState),
+		redisClient:   redisClient,
 	}
 }
 
@@ -127,17 +134,27 @@ func (s *AuthService) HandleCallback(code, state string) (*sessionState, error) 
 	s.sessions[session.ID] = session
 	s.mu.Unlock()
 
+	go s.persistSessionToRedis(session)
+
 	return &session, nil
 }
 
 func (s *AuthService) GetSession(sessionID string) (*sessionState, bool) {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	session, ok := s.sessions[sessionID]
+	s.mu.RUnlock()
+
 	if !ok {
-		return nil, false
+		loaded, err := s.loadSessionFromRedis(sessionID)
+		if err != nil {
+			return nil, false
+		}
+		s.mu.Lock()
+		s.sessions[loaded.ID] = loaded
+		s.mu.Unlock()
+		session = loaded
 	}
+
 	if session.ExpiresAt.Before(time.Now().UTC()) {
 		return nil, false
 	}
@@ -148,20 +165,56 @@ func (s *AuthService) GetSession(sessionID string) (*sessionState, bool) {
 
 func (s *AuthService) UpdateSessionUser(sessionID string, user *AuthUser) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	session, ok := s.sessions[sessionID]
-	if !ok {
-		return
+	if ok {
+		session.User = user
+		s.sessions[sessionID] = session
 	}
-	session.User = user
-	s.sessions[sessionID] = session
+	s.mu.Unlock()
+
+	if ok {
+		go s.persistSessionToRedis(session)
+	}
 }
 
 func (s *AuthService) DeleteSession(sessionID string) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	delete(s.sessions, sessionID)
+	s.mu.Unlock()
+
+	if s.redisClient != nil {
+		s.redisClient.Del(context.Background(), sessionRedisKeyPrefix+sessionID)
+	}
+}
+
+func (s *AuthService) persistSessionToRedis(session sessionState) {
+	if s.redisClient == nil {
+		return
+	}
+	ttl := time.Until(session.ExpiresAt)
+	if ttl <= 0 {
+		return
+	}
+	data, err := json.Marshal(session)
+	if err != nil {
+		log.Printf("Failed to marshal session %s for Redis: %v", session.ID, err)
+		return
+	}
+	if err := s.redisClient.Set(context.Background(), sessionRedisKeyPrefix+session.ID, data, ttl).Err(); err != nil {
+		log.Printf("Failed to persist session %s to Redis: %v", session.ID, err)
+	}
+}
+
+func (s *AuthService) loadSessionFromRedis(sessionID string) (sessionState, error) {
+	if s.redisClient == nil {
+		return sessionState{}, fmt.Errorf("no redis client")
+	}
+	data, err := s.redisClient.Get(context.Background(), sessionRedisKeyPrefix+sessionID).Bytes()
+	if err != nil {
+		return sessionState{}, err
+	}
+	var session sessionState
+	return session, json.Unmarshal(data, &session)
 }
 
 func (s *AuthService) consumePendingState(state string) bool {

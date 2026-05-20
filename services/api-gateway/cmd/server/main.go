@@ -21,10 +21,10 @@ func main() {
 		log.Printf("Redis configured at %s", cfg.RedisAddr)
 	}
 
-	analyzeService := services.NewAnalyzeService(cfg.LogServiceURL)
+	analyzeService := services.NewAnalyzeService(cfg.LogServiceURL, redisClient)
 	reportService := services.NewReportService(cfg.LogServiceURL, cfg.AnalysisServiceURL, cfg.AIServiceURL, redisClient)
-	authService := services.NewAuthService(cfg)
-	browserService := services.NewBrowserService(cfg.LogServiceURL)
+	authService := services.NewAuthService(cfg, redisClient)
+	browserService := services.NewBrowserService(cfg.LogServiceURL, redisClient)
 	handlers.RegisterRoutes(mux, cfg, analyzeService, reportService, authService, browserService)
 
 	serverAddr := fmt.Sprintf(":%s", cfg.Port)
