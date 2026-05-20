@@ -183,7 +183,7 @@ func (s *ReportService) HasCachedResult(req GenerateReportRequest) bool {
 	return ok
 }
 
-func (s *ReportService) CheckAndIncrementDailyUsage(ctx context.Context, userID int) (allowed bool, used int, err error) {
+func (s *ReportService) CheckAndIncrementDailyUsage(ctx context.Context, userID, limit int) (allowed bool, used int, err error) {
 	if s.redisClient == nil {
 		return true, 0, nil
 	}
@@ -197,7 +197,7 @@ func (s *ReportService) CheckAndIncrementDailyUsage(ctx context.Context, userID 
 	if count == 1 {
 		s.redisClient.Expire(ctx, key, 48*time.Hour)
 	}
-	return count <= int64(DailyAnalysisLimit), int(count), nil
+	return count <= int64(limit), int(count), nil
 }
 
 func (s *ReportService) getCachedRaw(ctx context.Context, key string) (json.RawMessage, bool) {

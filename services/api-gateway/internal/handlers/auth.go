@@ -11,13 +11,15 @@ import (
 type AuthHandler struct {
 	authService    *services.AuthService
 	browserService *services.BrowserService
+	accountService *services.AccountService
 	cfg            config.Config
 }
 
-func NewAuthHandler(authService *services.AuthService, browserService *services.BrowserService, cfg config.Config) *AuthHandler {
+func NewAuthHandler(authService *services.AuthService, browserService *services.BrowserService, accountService *services.AccountService, cfg config.Config) *AuthHandler {
 	return &AuthHandler{
 		authService:    authService,
 		browserService: browserService,
+		accountService: accountService,
 		cfg:            cfg,
 	}
 }
@@ -44,6 +46,11 @@ func (h *AuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 	user, err := h.browserService.GetCurrentUser(session.AccessToken)
 	if err == nil {
 		h.authService.UpdateSessionUser(session.ID, user)
+
+		account, accountErr := h.accountService.GetOrCreate(r.Context(), user.ID, user.Name, user.BattleTag)
+		if accountErr == nil {
+			h.authService.UpdateSessionTier(session.ID, account.Tier)
+		}
 	}
 
 	http.SetCookie(w, &http.Cookie{
@@ -78,9 +85,19 @@ func (h *AuthHandler) Status(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	tier := session.AccountTier
+	if tier == "" && user != nil {
+		account, err := h.accountService.GetOrCreate(r.Context(), user.ID, user.Name, user.BattleTag)
+		if err == nil {
+			h.authService.UpdateSessionTier(session.ID, account.Tier)
+			tier = account.Tier
+		}
+	}
+
 	writeJSON(w, http.StatusOK, services.AuthStatusResponse{
 		Authenticated: true,
 		User:          user,
+		Tier:          tier,
 	})
 }
 

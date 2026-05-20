@@ -1,6 +1,9 @@
 package config
 
-import "os"
+import (
+	"fmt"
+	"os"
+)
 
 type Config struct {
 	Port               string
@@ -14,7 +17,11 @@ type Config struct {
 	WCLAuthorizeURL    string
 	WCLTokenURL        string
 	WCLRedirectURL     string
-	RedisAddr          string
+	RedisAddr            string
+	DatabaseURL          string
+	StripeSecretKey      string
+	StripeWebhookSecret  string
+	StripeProPriceID     string
 }
 
 func Load() Config {
@@ -30,8 +37,27 @@ func Load() Config {
 		WCLAuthorizeURL:    getEnv("WCL_AUTHORIZE_URL", "https://www.warcraftlogs.com/oauth/authorize"),
 		WCLTokenURL:        getEnv("WCL_TOKEN_URL", "https://www.warcraftlogs.com/oauth/token"),
 		WCLRedirectURL:     getEnv("WCL_REDIRECT_URL", "http://localhost:8080/api/auth/callback"),
-		RedisAddr:          buildRedisAddr(),
+		RedisAddr:           buildRedisAddr(),
+		DatabaseURL:         buildDatabaseURL(),
+		StripeSecretKey:     getEnv("STRIPE_SECRET_KEY", ""),
+		StripeWebhookSecret: getEnv("STRIPE_WEBHOOK_SECRET", ""),
+		StripeProPriceID:    getEnv("STRIPE_PRO_PRICE_ID", ""),
 	}
+}
+
+func buildDatabaseURL() string {
+	if url := os.Getenv("DATABASE_URL"); url != "" {
+		return url
+	}
+	host := os.Getenv("POSTGRES_HOST")
+	if host == "" {
+		return ""
+	}
+	port := getEnv("POSTGRES_PORT", "5432")
+	user := getEnv("POSTGRES_USER", "postgres")
+	password := os.Getenv("POSTGRES_PASSWORD")
+	dbname := getEnv("POSTGRES_DB", "wowloganalyzer")
+	return fmt.Sprintf("postgres://%s:%s@%s:%s/%s", user, password, host, port, dbname)
 }
 
 func buildRedisAddr() string {

@@ -1,6 +1,6 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Link, Outlet, useNavigate } from "react-router-dom";
-import { getAuthStatus, logout } from "../../lib/api";
+import { createCheckoutSession, getAuthStatus, logout } from "../../lib/api";
 import { useBrowserStore } from "../../stores/useBrowserStore";
 import { Button } from "../ui/Button";
 
@@ -14,6 +14,7 @@ export function AppShell() {
         setError,
         reset,
     } = useBrowserStore();
+    const [upgrading, setUpgrading] = useState(false);
 
     useEffect(() => {
         let cancelled = false;
@@ -51,6 +52,16 @@ export function AppShell() {
         };
     }, [setAuth, setError, setLoadingState]);
 
+    async function handleUpgrade() {
+        setUpgrading(true);
+        try {
+            const url = await createCheckoutSession();
+            window.location.href = url;
+        } catch {
+            setUpgrading(false);
+        }
+    }
+
     async function handleLogout() {
         try {
             await logout();
@@ -82,6 +93,15 @@ export function AppShell() {
                                     <span className="text-sm text-slate-300">
                                         {auth.user.name}
                                     </span>
+                                )}
+                                {auth.tier !== "pro" && (
+                                    <Button
+                                        type="button"
+                                        onClick={handleUpgrade}
+                                        disabled={upgrading}
+                                    >
+                                        {upgrading ? "Redirecting..." : "Upgrade to Pro"}
+                                    </Button>
                                 )}
                                 <Button
                                     type="button"

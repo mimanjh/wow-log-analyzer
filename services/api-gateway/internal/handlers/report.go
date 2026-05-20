@@ -39,11 +39,12 @@ func (h *ReportHandler) CreateJob(w http.ResponseWriter, r *http.Request) {
 	if cookie, err := r.Cookie("wowlog_session"); err == nil {
 		if session, ok := h.authService.GetSession(cookie.Value); ok && session.User != nil {
 			if !h.reportService.HasCachedResult(req) {
-				allowed, _, usageErr := h.reportService.CheckAndIncrementDailyUsage(r.Context(), session.User.ID)
+				limit := services.TierDailyLimit(session.AccountTier)
+				allowed, _, usageErr := h.reportService.CheckAndIncrementDailyUsage(r.Context(), session.User.ID, limit)
 				if usageErr != nil {
 					log.Printf("Usage check failed for user %d: %v", session.User.ID, usageErr)
 				} else if !allowed {
-					http.Error(w, fmt.Sprintf("Daily analysis limit of %d reached. Try again tomorrow.", services.DailyAnalysisLimit), http.StatusTooManyRequests)
+					http.Error(w, fmt.Sprintf("Daily analysis limit of %d reached. Try again tomorrow.", limit), http.StatusTooManyRequests)
 					return
 				}
 			}

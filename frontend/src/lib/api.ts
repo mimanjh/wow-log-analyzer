@@ -175,6 +175,49 @@ export async function getResourceTimeline(
   return response.json()
 }
 
+export interface BillingStatus {
+  tier: string
+  subscription?: {
+    status: string
+    currentPeriodEnd?: string
+  }
+}
+
+export async function getBillingStatus(): Promise<BillingStatus> {
+  const response = await fetch('/api/billing/status', { credentials: 'include' })
+  if (!response.ok) {
+    const errorText = await response.text()
+    throw new Error(errorText || 'Failed to load billing status')
+  }
+  return response.json()
+}
+
+export async function createCheckoutSession(): Promise<string> {
+  const response = await fetch('/api/billing/checkout', {
+    method: 'POST',
+    credentials: 'include',
+  })
+  if (!response.ok) {
+    const errorText = await response.text()
+    throw new Error(errorText || 'Failed to create checkout session')
+  }
+  const data = await response.json() as { url: string }
+  return data.url
+}
+
+export async function createPortalSession(): Promise<string> {
+  const response = await fetch('/api/billing/portal', {
+    method: 'POST',
+    credentials: 'include',
+  })
+  if (!response.ok) {
+    const errorText = await response.text()
+    throw new Error(errorText || 'Failed to create portal session')
+  }
+  const data = await response.json() as { url: string }
+  return data.url
+}
+
 export async function getAuthStatus(): Promise<AuthStatus> {
   const response = await fetch('/api/auth/status', {
     credentials: 'include',

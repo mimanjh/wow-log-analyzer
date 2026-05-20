@@ -25,6 +25,7 @@ const sessionCookieName = "wowlog_session"
 type AuthStatusResponse struct {
 	Authenticated bool      `json:"authenticated"`
 	User          *AuthUser `json:"user,omitempty"`
+	Tier          string    `json:"tier,omitempty"`
 }
 
 type AuthUser struct {
@@ -34,11 +35,12 @@ type AuthUser struct {
 	BattleTag string `json:"battleTag,omitempty"`
 }
 
-type sessionState struct {
+type SessionState struct {
 	ID          string
 	AccessToken string
 	ExpiresAt   time.Time
 	User        *AuthUser
+	AccountTier string
 }
 
 type pendingOAuthState struct {
@@ -49,7 +51,7 @@ type AuthService struct {
 	cfg           config.Config
 	httpClient    *http.Client
 	mu            sync.RWMutex
-	sessions      map[string]sessionState
+	sessions      map[string]SessionState
 	pendingStates map[string]pendingOAuthState
 	redisClient   *redis.Client
 }
@@ -58,7 +60,7 @@ func NewAuthService(cfg config.Config, redisClient *redis.Client) *AuthService {
 	return &AuthService{
 		cfg:           cfg,
 		httpClient:    &http.Client{Timeout: 30 * time.Second},
-		sessions:      make(map[string]sessionState),
+		sessions:      make(map[string]SessionState),
 		pendingStates: make(map[string]pendingOAuthState),
 		redisClient:   redisClient,
 	}
@@ -81,7 +83,7 @@ func (s *AuthService) BuildLoginURL() (string, error) {
 	return s.cfg.WCLAuthorizeURL + "?" + query.Encode(), nil
 }
 
-func (s *AuthService) HandleCallback(code, state string) (*sessionState, error) {
+func (s *AuthService) HandleCallback(code, state string) (*SessionState, error) {
 	if code == "" || state == "" {
 		return nil, fmt.Errorf("code and state are required")
 	}
@@ -124,7 +126,7 @@ func (s *AuthService) HandleCallback(code, state string) (*sessionState, error) 
 		return nil, fmt.Errorf("oauth token exchange returned an empty access token")
 	}
 
-	session := sessionState{
+	session := SessionState{
 		ID:          randomToken(24),
 		AccessToken: payload.AccessToken,
 		ExpiresAt:   time.Now().UTC().Add(time.Duration(payload.ExpiresIn) * time.Second),
@@ -139,7 +141,7 @@ func (s *AuthService) HandleCallback(code, state string) (*sessionState, error) 
 	return &session, nil
 }
 
-func (s *AuthService) GetSession(sessionID string) (*sessionState, bool) {
+func (s *AuthService) GetSession(sessionID string) (*SessionState, bool) {
 	s.mu.RLock()
 	session, ok := s.sessions[sessionID]
 	s.mu.RUnlock()
@@ -177,6 +179,20 @@ func (s *AuthService) UpdateSessionUser(sessionID string, user *AuthUser) {
 	}
 }
 
+func (s *AuthService) UpdateSessionTier(sessionID, tier string) {
+	s.mu.Lock()
+	session, ok := s.sessions[sessionID]
+	if ok {
+		session.AccountTier = tier
+		s.sessions[sessionID] = session
+	}
+	s.mu.Unlock()
+
+	if ok {
+		go s.persistSessionToRedis(session)
+	}
+}
+
 func (s *AuthService) DeleteSession(sessionID string) {
 	s.mu.Lock()
 	delete(s.sessions, sessionID)
@@ -187,7 +203,7 @@ func (s *AuthService) DeleteSession(sessionID string) {
 	}
 }
 
-func (s *AuthService) persistSessionToRedis(session sessionState) {
+func (s *AuthService) persistSessionToRedis(session SessionState) {
 	if s.redisClient == nil {
 		return
 	}
@@ -205,15 +221,15 @@ func (s *AuthService) persistSessionToRedis(session sessionState) {
 	}
 }
 
-func (s *AuthService) loadSessionFromRedis(sessionID string) (sessionState, error) {
+func (s *AuthService) loadSessionFromRedis(sessionID string) (SessionState, error) {
 	if s.redisClient == nil {
-		return sessionState{}, fmt.Errorf("no redis client")
+		return SessionState{}, fmt.Errorf("no redis client")
 	}
 	data, err := s.redisClient.Get(context.Background(), sessionRedisKeyPrefix+sessionID).Bytes()
 	if err != nil {
-		return sessionState{}, err
+		return SessionState{}, err
 	}
-	var session sessionState
+	var session SessionState
 	return session, json.Unmarshal(data, &session)
 }
 

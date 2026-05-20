@@ -46,6 +46,7 @@ export interface BrowserState {
 export interface AuthStatus {
   authenticated: boolean
   user?: AuthUser
+  tier?: string
 }
 
 export interface AuthUser {
