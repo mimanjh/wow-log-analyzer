@@ -19,10 +19,17 @@ func main() {
 	ctx := context.Background()
 	mux := http.NewServeMux()
 
-	var redisClient *redis.Client
-	if cfg.RedisAddr != "" {
-		redisClient = redis.NewClient(&redis.Options{Addr: cfg.RedisAddr})
-		log.Printf("Redis configured at %s", cfg.RedisAddr)
+	redisClient, redisDesc, err := buildRedisClient(cfg)
+	if err != nil {
+		log.Fatalf("Failed to configure Redis: %v", err)
+	}
+	if redisClient != nil {
+		if pingErr := redisClient.Ping(ctx).Err(); pingErr != nil {
+			log.Printf("Redis ping failed (%s): %v — continuing without cache", redisDesc, pingErr)
+			redisClient = nil
+		} else {
+			log.Printf("Redis connected (%s)", redisDesc)
+		}
 	}
 
 	var accountService *services.AccountService
@@ -60,4 +67,17 @@ func main() {
 	if err := http.ListenAndServe(serverAddr, mux); err != nil {
 		log.Fatalf("api-gateway server failed: %v", err)
 	}
+}
+
+// buildRedisClient parses REDIS_URL (redis:// or rediss://) so the same
+// config drives local Docker and Redis Cloud. Empty URL = caching disabled.
+func buildRedisClient(cfg config.Config) (*redis.Client, string, error) {
+	if cfg.RedisURL == "" {
+		return nil, "", nil
+	}
+	opts, err := redis.ParseURL(cfg.RedisURL)
+	if err != nil {
+		return nil, "", fmt.Errorf("parse REDIS_URL: %w", err)
+	}
+	return redis.NewClient(opts), opts.Addr, nil
 }

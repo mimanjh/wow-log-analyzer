@@ -17,7 +17,7 @@ type Config struct {
 	WCLAuthorizeURL    string
 	WCLTokenURL        string
 	WCLRedirectURL     string
-	RedisAddr            string
+	RedisURL             string
 	DatabaseURL          string
 	StripeSecretKey      string
 	StripeWebhookSecret  string
@@ -37,7 +37,7 @@ func Load() Config {
 		WCLAuthorizeURL:    getEnv("WCL_AUTHORIZE_URL", "https://www.warcraftlogs.com/oauth/authorize"),
 		WCLTokenURL:        getEnv("WCL_TOKEN_URL", "https://www.warcraftlogs.com/oauth/token"),
 		WCLRedirectURL:     getEnv("WCL_REDIRECT_URL", "http://localhost:8080/api/auth/callback"),
-		RedisAddr:           buildRedisAddr(),
+		RedisURL:            getEnv("REDIS_URL", ""),
 		DatabaseURL:         buildDatabaseURL(),
 		StripeSecretKey:     getEnv("STRIPE_SECRET_KEY", ""),
 		StripeWebhookSecret: getEnv("STRIPE_WEBHOOK_SECRET", ""),
@@ -58,21 +58,6 @@ func buildDatabaseURL() string {
 	password := os.Getenv("POSTGRES_PASSWORD")
 	dbname := getEnv("POSTGRES_DB", "wowloganalyzer")
 	return fmt.Sprintf("postgres://%s:%s@%s:%s/%s", user, password, host, port, dbname)
-}
-
-func buildRedisAddr() string {
-	if addr := os.Getenv("REDIS_ADDR"); addr != "" {
-		return addr
-	}
-	host := os.Getenv("REDIS_HOST")
-	if host == "" {
-		return ""
-	}
-	port := os.Getenv("REDIS_PORT")
-	if port == "" {
-		port = "6379"
-	}
-	return host + ":" + port
 }
 
 func getEnv(key, fallback string) string {
