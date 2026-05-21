@@ -89,6 +89,12 @@ export function AppShell() {
                     <div className="flex flex-wrap items-center gap-3">
                         {auth?.authenticated ? (
                             <div className="flex items-center gap-3">
+                                <Link
+                                    to="/reports"
+                                    className="text-sm text-slate-300 hover:text-white"
+                                >
+                                    My Reports
+                                </Link>
                                 {auth.user?.name && (
                                     <span className="text-sm text-slate-300">
                                         {auth.user.name}

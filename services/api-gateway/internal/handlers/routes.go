@@ -10,7 +10,7 @@ import (
 
 func RegisterRoutes(mux *http.ServeMux, cfg config.Config, analyzeService *services.AnalyzeService, reportService *services.ReportService, authService *services.AuthService, browserService *services.BrowserService, accountService *services.AccountService, billingService *services.BillingService) {
 	analyzeHandler := NewAnalyzeHandler(analyzeService)
-	reportHandler := NewReportHandler(reportService, authService)
+	reportHandler := NewReportHandler(reportService, authService, accountService)
 	authHandler := NewAuthHandler(authService, browserService, accountService, cfg)
 	browserHandler := NewBrowserHandler(authService, browserService)
 	billingHandler := NewBillingHandler(authService, accountService, billingService, cfg.FrontendURL)
@@ -33,6 +33,7 @@ func RegisterRoutes(mux *http.ServeMux, cfg config.Config, analyzeService *servi
 	mux.HandleFunc("/api/analyze/fights", analyzeHandler.HandleFights)
 	mux.HandleFunc("/api/analyze/characters", analyzeHandler.HandleCharacters)
 	mux.HandleFunc("/api/report/jobs", reportHandler.CreateJob)
+	mux.HandleFunc("/api/reports", reportHandler.List)
 	mux.HandleFunc("/api/billing/checkout", billingHandler.CreateCheckout)
 	mux.HandleFunc("/api/billing/status", billingHandler.GetStatus)
 	mux.HandleFunc("/api/billing/portal", billingHandler.CreatePortal)

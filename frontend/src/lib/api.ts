@@ -256,6 +256,32 @@ export async function getBrowserCharacters(): Promise<BrowserCharacter[]> {
   return response.json()
 }
 
+export interface SavedReport {
+  reportId: string
+  fightId: number
+  characterId: number
+  encounterName: string
+  difficulty: string
+  characterName: string
+  characterClass: string
+  characterSpec: string
+  analyzedAt: string
+  cached: boolean
+}
+
+export async function listSavedReports(): Promise<SavedReport[]> {
+  const response = await fetch('/api/reports', {
+    credentials: 'include',
+  })
+
+  if (!response.ok) {
+    const errorText = await response.text()
+    throw new Error(errorText || 'Failed to load saved reports')
+  }
+
+  return response.json()
+}
+
 export async function getCharacterReports(
   characterId: number,
   cursor?: string | null,

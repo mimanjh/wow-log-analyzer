@@ -12,12 +12,13 @@ import (
 )
 
 type ReportHandler struct {
-	reportService *services.ReportService
-	authService   *services.AuthService
+	reportService  *services.ReportService
+	authService    *services.AuthService
+	accountService *services.AccountService
 }
 
-func NewReportHandler(reportService *services.ReportService, authService *services.AuthService) *ReportHandler {
-	return &ReportHandler{reportService: reportService, authService: authService}
+func NewReportHandler(reportService *services.ReportService, authService *services.AuthService, accountService *services.AccountService) *ReportHandler {
+	return &ReportHandler{reportService: reportService, authService: authService, accountService: accountService}
 }
 
 func (h *ReportHandler) CreateJob(w http.ResponseWriter, r *http.Request) {
@@ -35,7 +36,8 @@ func (h *ReportHandler) CreateJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Enforce daily usage limit for authenticated users, but skip if result is already cached.
+	// Enforce daily usage limit for authenticated users (skip if cached), and
+	// record this report against the user's account so it shows up on /reports.
 	if cookie, err := r.Cookie("wowlog_session"); err == nil {
 		if session, ok := h.authService.GetSession(cookie.Value); ok && session.User != nil {
 			if !h.reportService.HasCachedResult(req) {
@@ -46,6 +48,23 @@ func (h *ReportHandler) CreateJob(w http.ResponseWriter, r *http.Request) {
 				} else if !allowed {
 					http.Error(w, fmt.Sprintf("Daily analysis limit of %d reached. Try again tomorrow.", limit), http.StatusTooManyRequests)
 					return
+				}
+			}
+			if h.accountService != nil {
+				if account, accErr := h.accountService.GetByWCLUserID(r.Context(), session.User.ID); accErr == nil {
+					recordErr := h.accountService.RecordReport(r.Context(), account.ID, services.UserReport{
+						ReportID:       req.ReportID,
+						FightID:        req.Fight.ID,
+						CharacterID:    req.Character.ID,
+						EncounterName:  req.Fight.Name,
+						Difficulty:     req.Fight.Difficulty,
+						CharacterName:  req.Character.Name,
+						CharacterClass: req.Character.Class,
+						CharacterSpec:  req.Character.Spec,
+					})
+					if recordErr != nil {
+						log.Printf("Failed to record user report for account %d: %v", account.ID, recordErr)
+					}
 				}
 			}
 		}
@@ -62,6 +81,80 @@ func (h *ReportHandler) CreateJob(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		log.Printf("Failed to encode report response: %v", err)
+	}
+}
+
+// List returns the authenticated user's saved reports, newest first, each
+// flagged with whether the cached result is still warm in Redis. Anonymous
+// callers get 401 — the listing is meaningless without an account.
+type userReportListEntry struct {
+	ReportID       string `json:"reportId"`
+	FightID        int    `json:"fightId"`
+	CharacterID    int    `json:"characterId"`
+	EncounterName  string `json:"encounterName"`
+	Difficulty     string `json:"difficulty"`
+	CharacterName  string `json:"characterName"`
+	CharacterClass string `json:"characterClass"`
+	CharacterSpec  string `json:"characterSpec"`
+	AnalyzedAt     string `json:"analyzedAt"`
+	Cached         bool   `json:"cached"`
+}
+
+func (h *ReportHandler) List(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	cookie, err := r.Cookie("wowlog_session")
+	if err != nil {
+		http.Error(w, "Authentication required", http.StatusUnauthorized)
+		return
+	}
+	session, ok := h.authService.GetSession(cookie.Value)
+	if !ok || session.User == nil {
+		http.Error(w, "Authentication required", http.StatusUnauthorized)
+		return
+	}
+	if h.accountService == nil {
+		http.Error(w, "Account storage not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	account, err := h.accountService.GetByWCLUserID(r.Context(), session.User.ID)
+	if err != nil {
+		log.Printf("Account lookup failed for wcl_user_id=%d: %v", session.User.ID, err)
+		http.Error(w, "Account not found", http.StatusNotFound)
+		return
+	}
+
+	reports, err := h.accountService.ListReports(r.Context(), account.ID, 50)
+	if err != nil {
+		log.Printf("List reports failed for account %d: %v", account.ID, err)
+		http.Error(w, "Failed to list reports", http.StatusInternalServerError)
+		return
+	}
+
+	entries := make([]userReportListEntry, 0, len(reports))
+	for _, rep := range reports {
+		entries = append(entries, userReportListEntry{
+			ReportID:       rep.ReportID,
+			FightID:        rep.FightID,
+			CharacterID:    rep.CharacterID,
+			EncounterName:  rep.EncounterName,
+			Difficulty:     rep.Difficulty,
+			CharacterName:  rep.CharacterName,
+			CharacterClass: rep.CharacterClass,
+			CharacterSpec:  rep.CharacterSpec,
+			AnalyzedAt:     rep.AnalyzedAt.UTC().Format("2006-01-02T15:04:05Z"),
+			Cached:         h.reportService.HasCachedResultForKey(r.Context(), rep.ReportID, rep.FightID, rep.CharacterID),
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(entries); err != nil {
+		log.Printf("Failed to encode reports list: %v", err)
 	}
 }
 

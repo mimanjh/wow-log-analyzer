@@ -73,6 +73,23 @@ func (s *AccountService) Migrate(ctx context.Context) error {
 			updated_at             TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_subscriptions_account_id ON subscriptions(account_id)`,
+		`CREATE TABLE IF NOT EXISTS user_reports (
+			id              SERIAL      PRIMARY KEY,
+			account_id      INTEGER     NOT NULL REFERENCES accounts(id),
+			report_id       TEXT        NOT NULL,
+			fight_id        INTEGER     NOT NULL,
+			character_id    INTEGER     NOT NULL,
+			encounter_name  TEXT        NOT NULL DEFAULT '',
+			difficulty      TEXT        NOT NULL DEFAULT '',
+			character_name  TEXT        NOT NULL DEFAULT '',
+			character_class TEXT        NOT NULL DEFAULT '',
+			character_spec  TEXT        NOT NULL DEFAULT '',
+			analyzed_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_user_reports_unique
+			ON user_reports(account_id, report_id, fight_id, character_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_user_reports_account_recent
+			ON user_reports(account_id, analyzed_at DESC)`,
 	}
 	for _, stmt := range stmts {
 		if _, err := s.db.Exec(ctx, stmt); err != nil {
@@ -193,6 +210,82 @@ func (s *AccountService) GetSubscriptionByAccountID(ctx context.Context, account
 		return nil, err
 	}
 	return &sub, nil
+}
+
+// UserReport is one analysis the user has run — metadata only. The full result
+// blob lives in Redis at report:result:{reportId}:{fightId}:{characterId} and
+// expires on the standard 30-day cache TTL.
+type UserReport struct {
+	ReportID       string
+	FightID        int
+	CharacterID    int
+	EncounterName  string
+	Difficulty     string
+	CharacterName  string
+	CharacterClass string
+	CharacterSpec  string
+	AnalyzedAt     time.Time
+}
+
+// RecordReport upserts a row in user_reports keyed by (account, report, fight,
+// character). Repeat analyses of the same report bump analyzed_at so the list
+// stays sorted by most-recent.
+func (s *AccountService) RecordReport(ctx context.Context, accountID int, report UserReport) error {
+	if s.db == nil {
+		return fmt.Errorf("database not configured")
+	}
+	_, err := s.db.Exec(ctx, `
+		INSERT INTO user_reports (
+			account_id, report_id, fight_id, character_id,
+			encounter_name, difficulty, character_name, character_class, character_spec, analyzed_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+		ON CONFLICT (account_id, report_id, fight_id, character_id) DO UPDATE
+			SET encounter_name  = EXCLUDED.encounter_name,
+			    difficulty      = EXCLUDED.difficulty,
+			    character_name  = EXCLUDED.character_name,
+			    character_class = EXCLUDED.character_class,
+			    character_spec  = EXCLUDED.character_spec,
+			    analyzed_at     = NOW()
+	`, accountID, report.ReportID, report.FightID, report.CharacterID,
+		report.EncounterName, report.Difficulty, report.CharacterName, report.CharacterClass, report.CharacterSpec)
+	return err
+}
+
+// ListReports returns the user's saved reports, newest first. Capped at `limit`
+// (server-side default 50) — no cursor yet since the MVP fits on one screen.
+func (s *AccountService) ListReports(ctx context.Context, accountID, limit int) ([]UserReport, error) {
+	if s.db == nil {
+		return nil, fmt.Errorf("database not configured")
+	}
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	const q = `
+		SELECT report_id, fight_id, character_id, encounter_name, difficulty,
+		       character_name, character_class, character_spec, analyzed_at
+		FROM user_reports
+		WHERE account_id = $1
+		ORDER BY analyzed_at DESC
+		LIMIT $2
+	`
+	rows, err := s.db.Query(ctx, q, accountID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	reports := make([]UserReport, 0)
+	for rows.Next() {
+		var r UserReport
+		if err := rows.Scan(
+			&r.ReportID, &r.FightID, &r.CharacterID, &r.EncounterName, &r.Difficulty,
+			&r.CharacterName, &r.CharacterClass, &r.CharacterSpec, &r.AnalyzedAt,
+		); err != nil {
+			return nil, err
+		}
+		reports = append(reports, r)
+	}
+	return reports, rows.Err()
 }
 
 // TierDailyLimit returns the analyses-per-day allowed for a given tier.

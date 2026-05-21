@@ -185,6 +185,17 @@ func (s *ReportService) HasCachedResult(req GenerateReportRequest) bool {
 	return ok
 }
 
+// HasCachedResultForKey returns true if a cached report result exists for the
+// (reportID, fightID, characterID) tuple. Cheaper than HasCachedResult — uses
+// EXISTS instead of GET + Unmarshal.
+func (s *ReportService) HasCachedResultForKey(ctx context.Context, reportID string, fightID, characterID int) bool {
+	if s.redisClient == nil {
+		return false
+	}
+	n, err := s.redisClient.Exists(ctx, s.key(resultCacheKey(reportID, fightID, characterID))).Result()
+	return err == nil && n > 0
+}
+
 func (s *ReportService) CheckAndIncrementDailyUsage(ctx context.Context, userID, limit int) (allowed bool, used int, err error) {
 	if s.redisClient == nil {
 		return true, 0, nil
