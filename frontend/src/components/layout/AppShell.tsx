@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { Link, Outlet, useNavigate } from "react-router-dom";
 import { createCheckoutSession, getAuthStatus, logout } from "../../lib/api";
 import { useBrowserStore } from "../../stores/useBrowserStore";
@@ -14,7 +14,6 @@ export function AppShell() {
         setError,
         reset,
     } = useBrowserStore();
-    const [upgrading, setUpgrading] = useState(false);
 
     useEffect(() => {
         let cancelled = false;
@@ -52,14 +51,13 @@ export function AppShell() {
         };
     }, [setAuth, setError, setLoadingState]);
 
-    async function handleUpgrade() {
-        setUpgrading(true);
-        try {
-            const url = await createCheckoutSession();
-            window.location.href = url;
-        } catch {
-            setUpgrading(false);
-        }
+    function handleUpgrade() {
+        // Stripe checkout isn't wired up yet — keep the createCheckoutSession
+        // import around so we can flip back here when it is.
+        void createCheckoutSession;
+        window.alert(
+            "Pro upgrades aren't available yet — we're working on it. Check back soon!",
+        );
     }
 
     async function handleLogout() {
@@ -104,9 +102,8 @@ export function AppShell() {
                                     <Button
                                         type="button"
                                         onClick={handleUpgrade}
-                                        disabled={upgrading}
                                     >
-                                        {upgrading ? "Redirecting..." : "Upgrade to Pro"}
+                                        Upgrade to Pro
                                     </Button>
                                 )}
                                 <Button
