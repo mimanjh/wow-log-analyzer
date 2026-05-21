@@ -36,7 +36,7 @@ const reportStages = [
     { key: "rankings", label: "Find Ranking Elites" },
     { key: "cohort", label: "Load Top Ranked Fights" },
     { key: "analyzing", label: "Run Deterministic Analysis" },
-    { key: "insights", label: "Generate Insights" },
+    { key: "insights", label: "Contacting LLM" },
     { key: "completed", label: "Complete" },
 ] as const;
 

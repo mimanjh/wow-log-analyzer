@@ -191,7 +191,11 @@ func (s *ReportService) runJob(jobID string, req GenerateReportRequest) {
 		},
 	}
 
-	s.updateJob(jobID, ReportJobRunning, "insights", "Generating AI insights.", ReportJobProgress{Current: 5, Total: 5}, "", &response)
+	// Hold the result off the job while AI runs — otherwise the frontend
+	// polling will see a result without AI populated, render the report
+	// immediately, and have the AI section appear seconds later. By leaving
+	// Result nil here the progress view stays up until the job completes.
+	s.updateJob(jobID, ReportJobRunning, "insights", "Contacting LLM for coaching insights — this can take a few seconds.", ReportJobProgress{Current: 5, Total: 5}, "", nil)
 	insights, err := s.fetchInsights(ctx, req, response.Comparison, *playerCtx, cohortContexts)
 	if err != nil {
 		fmt.Printf("AI insights unavailable for job %s: %v\n", jobID, err)
