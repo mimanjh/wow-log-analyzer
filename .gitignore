@@ -8,6 +8,7 @@ AGENTS.md
 MVP_SPEC.md
 PROJECT_CONTEXT.md
 CLAUDE.md
+TODO.md
 .claude/
 
 # Frontend
@@ -22,10 +23,12 @@ services/api-gateway/internal/handlers/web/*
 !services/api-gateway/internal/handlers/web/index.html
 
 # Go
+bin/
 services/**/server.exe
 services/**/bin/
 services/**/coverage.out
 services/**/.gocache/
+*.exe
 
 # OS / editor
 .DS_Store
