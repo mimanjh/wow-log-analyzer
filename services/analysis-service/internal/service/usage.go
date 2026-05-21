@@ -6,38 +6,28 @@ import (
 	"strings"
 	"time"
 
-	"wow-log-analyzer/services/analysis-service/internal/types"
+	"wow-log-analyzer/services/analysis-service/types"
 )
 
-type abilityUsageSummary struct {
-	AbilityID       int
-	AbilityName     string
-	Count           int
-	CastsPerMinute  float64
-	FirstUseSeconds float64
-	HasFirstUse     bool
-}
-
-type buffUptimeSummary struct {
-	AbilityID         int
-	AbilityName       string
-	UptimePct         float64
-	FirstApplySeconds float64
-	HasFirstApply     bool
-}
 
 func (s *AnalysisService) CalculateAbilityUsageComparisons(playerData types.PlayerFightData, cohortData []types.PlayerFightData, characterClass, characterSpec string) []types.AbilityUsageComparison {
 	playerSummary := summarizeAbilityUsage(playerData)
-	cohortSummaries := make([]map[int]abilityUsageSummary, len(cohortData))
-	abilityNames := make(map[int]string)
+	cohortSummaries := make([]map[int]types.AbilityUsageSummary, len(cohortData))
+	for i, entry := range cohortData {
+		cohortSummaries[i] = summarizeAbilityUsage(entry)
+	}
+	return s.CompareAbilityUsages(playerSummary, cohortSummaries, characterClass, characterSpec)
+}
 
+// CompareAbilityUsages is the cached-input variant — same logic as
+// CalculateAbilityUsageComparisons but skips the raw-event summarization step.
+func (s *AnalysisService) CompareAbilityUsages(playerSummary map[int]types.AbilityUsageSummary, cohortSummaries []map[int]types.AbilityUsageSummary, characterClass, characterSpec string) []types.AbilityUsageComparison {
+	abilityNames := make(map[int]string)
 	for id, summary := range playerSummary {
 		abilityNames[id] = summary.AbilityName
 	}
-
-	for i, entry := range cohortData {
-		cohortSummaries[i] = summarizeAbilityUsage(entry)
-		for id, summary := range cohortSummaries[i] {
+	for _, summaryMap := range cohortSummaries {
+		for id, summary := range summaryMap {
 			if _, exists := abilityNames[id]; !exists {
 				abilityNames[id] = summary.AbilityName
 			}
@@ -112,16 +102,21 @@ func (s *AnalysisService) CalculateAbilityUsageComparisons(playerData types.Play
 
 func (s *AnalysisService) CalculateBuffUptimeComparisons(playerData types.PlayerFightData, cohortData []types.PlayerFightData) []types.BuffUptimeComparison {
 	playerSummary := summarizeBuffUptime(playerData)
-	cohortSummaries := make([]map[int]buffUptimeSummary, len(cohortData))
-	buffNames := make(map[int]string)
+	cohortSummaries := make([]map[int]types.BuffUptimeSummary, len(cohortData))
+	for i, entry := range cohortData {
+		cohortSummaries[i] = summarizeBuffUptime(entry)
+	}
+	return s.CompareBuffUptimes(playerSummary, cohortSummaries)
+}
 
+// CompareBuffUptimes is the cached-input variant of CalculateBuffUptimeComparisons.
+func (s *AnalysisService) CompareBuffUptimes(playerSummary map[int]types.BuffUptimeSummary, cohortSummaries []map[int]types.BuffUptimeSummary) []types.BuffUptimeComparison {
+	buffNames := make(map[int]string)
 	for id, summary := range playerSummary {
 		buffNames[id] = summary.AbilityName
 	}
-
-	for i, entry := range cohortData {
-		cohortSummaries[i] = summarizeBuffUptime(entry)
-		for id, summary := range cohortSummaries[i] {
+	for _, summaryMap := range cohortSummaries {
+		for id, summary := range summaryMap {
 			if _, exists := buffNames[id]; !exists {
 				buffNames[id] = summary.AbilityName
 			}
@@ -187,8 +182,8 @@ func (s *AnalysisService) CalculateBuffUptimeComparisons(playerData types.Player
 	return filterTopBuffComparisons(comparisons, 10)
 }
 
-func summarizeAbilityUsage(data types.PlayerFightData) map[int]abilityUsageSummary {
-	summaries := make(map[int]abilityUsageSummary)
+func summarizeAbilityUsage(data types.PlayerFightData) map[int]types.AbilityUsageSummary {
+	summaries := make(map[int]types.AbilityUsageSummary)
 	durationMinutes := data.FightEnd.Sub(data.FightStart).Minutes()
 	if durationMinutes <= 0 {
 		durationMinutes = 1
@@ -255,7 +250,7 @@ func summarizeAbilityUsage(data types.PlayerFightData) map[int]abilityUsageSumma
 	return summaries
 }
 
-func summarizeBuffUptime(data types.PlayerFightData) map[int]buffUptimeSummary {
+func summarizeBuffUptime(data types.PlayerFightData) map[int]types.BuffUptimeSummary {
 	type state struct {
 		name          string
 		active        bool
@@ -325,7 +320,7 @@ func summarizeBuffUptime(data types.PlayerFightData) map[int]buffUptimeSummary {
 		}
 	}
 
-	summaries := make(map[int]buffUptimeSummary, len(states))
+	summaries := make(map[int]types.BuffUptimeSummary, len(states))
 	for abilityID, entry := range states {
 		if entry.active && !entry.lastApplied.IsZero() && data.FightEnd.After(entry.lastApplied) {
 			entry.totalUptime += data.FightEnd.Sub(entry.lastApplied)
@@ -336,7 +331,7 @@ func summarizeBuffUptime(data types.PlayerFightData) map[int]buffUptimeSummary {
 		if entry.totalUptime > data.FightEnd.Sub(data.FightStart) {
 			entry.totalUptime = data.FightEnd.Sub(data.FightStart)
 		}
-		summaries[abilityID] = buffUptimeSummary{
+		summaries[abilityID] = types.BuffUptimeSummary{
 			AbilityID:         abilityID,
 			AbilityName:       entry.name,
 			UptimePct:         (entry.totalUptime.Seconds() / durationSeconds) * 100,

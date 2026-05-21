@@ -6,43 +6,92 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 
+	analysistypes "wow-log-analyzer/services/analysis-service/types"
 	"wow-log-analyzer/services/api-gateway/internal/config"
 )
 
-func (s *ReportService) getOrFetchPlayerData(ctx context.Context, req GenerateReportRequest) (json.RawMessage, error) {
-	key := s.key(fmt.Sprintf("%s%s:%d:%d", playerDataCacheKeyPrefix, req.ReportID, req.Fight.ID, req.Character.ID))
+// getOrFetchCohortMemberContext returns the precomputed MemberContext for a
+// cohort candidate, falling back to a raw fetch + analysis-service compute on
+// cache miss. The MemberContext is what we cache now (~5-20KB) instead of the
+// ~1MB raw fight JSON — the cache-hit path skips both the WCL call AND the
+// analysis-service computation.
+//
+// The second return is a decoded timelineFightData populated ONLY on the cache
+// miss path (we already have the raw JSON in hand, so we hand it back so the
+// timeline UI can render this elite's per-ability bars). On cache hit it's
+// nil — that elite is absent from the timeline UI but still contributes to
+// the deterministic comparison and AI insights via MemberContext.
+func (s *ReportService) getOrFetchCohortMemberContext(ctx context.Context, candidate RankingCandidate, characterClass, characterSpec string) (*analysistypes.MemberContext, *timelineFightData, error) {
+	key := s.key(cohortMemberContextCacheKeyPrefix + rankingCandidateKey(candidate))
 	if data, ok := s.getCachedRaw(ctx, key); ok {
-		return data, nil
+		var memberCtx analysistypes.MemberContext
+		if err := json.Unmarshal(data, &memberCtx); err == nil {
+			return &memberCtx, nil, nil
+		}
 	}
-	data, err := s.fetchPlayerData(ctx, req)
+	raw, err := s.fetchCohortMember(ctx, candidate)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	s.setCachedRaw(ctx, key, data, playerDataCacheTTL)
-	return data, nil
+	memberCtx, err := s.computeMemberContext(ctx, raw, characterClass, characterSpec)
+	if err != nil {
+		return nil, nil, err
+	}
+	if data, err := json.Marshal(memberCtx); err == nil {
+		s.setCachedRaw(ctx, key, data, cohortMemberContextCacheTTL)
+	}
+	decoded, decodeErr := decodeTimelineFightData(raw)
+	if decodeErr != nil {
+		return memberCtx, nil, nil
+	}
+	return memberCtx, &decoded, nil
 }
 
-func (s *ReportService) getOrFetchCohortMember(ctx context.Context, candidate RankingCandidate) (json.RawMessage, error) {
-	key := s.key(cohortMemberCacheKeyPrefix + rankingCandidateKey(candidate))
-	if data, ok := s.getCachedRaw(ctx, key); ok {
-		return data, nil
-	}
-	data, err := s.fetchCohortMember(ctx, candidate)
+// computeMemberContext POSTs raw fight JSON to analysis-service /analyze/member
+// and returns the small computed snapshot. Used for both the player's own data
+// and for cohort members on cache miss.
+func (s *ReportService) computeMemberContext(ctx context.Context, raw json.RawMessage, characterClass, characterSpec string) (*analysistypes.MemberContext, error) {
+	var memberCtx analysistypes.MemberContext
+	err := s.postForJSON(
+		ctx,
+		s.analysisClient,
+		s.analysisURL+"/analyze/member",
+		analyzeMemberRequest{
+			PlayerData:     raw,
+			CharacterClass: characterClass,
+			CharacterSpec:  characterSpec,
+		},
+		&memberCtx,
+		"analysis-service",
+	)
 	if err != nil {
 		return nil, err
 	}
-	s.setCachedRaw(ctx, key, data, cohortMemberCacheTTL)
-	return data, nil
+	return &memberCtx, nil
+}
+
+type analyzeMemberRequest struct {
+	PlayerData     json.RawMessage `json:"playerData"`
+	CharacterClass string          `json:"characterClass"`
+	CharacterSpec  string          `json:"characterSpec"`
+}
+
+type compareContextsRequest struct {
+	Player         analysistypes.MemberContext   `json:"player"`
+	Cohort         []analysistypes.MemberContext `json:"cohort"`
+	CharacterClass string                        `json:"characterClass"`
+	CharacterSpec  string                        `json:"characterSpec"`
 }
 
 func (s *ReportService) runJob(jobID string, req GenerateReportRequest) {
 	ctx := context.Background()
 
 	s.updateJob(jobID, ReportJobRunning, "player-data", "Fetching selected player fight data.", ReportJobProgress{Current: 1, Total: 5}, "", nil)
-	playerData, err := s.getOrFetchPlayerData(ctx, req)
+	playerData, err := s.fetchPlayerData(ctx, req)
 	if err != nil {
 		s.updateJob(jobID, ReportJobFailed, "player-data", "Failed to fetch selected player fight data.", ReportJobProgress{Current: 1, Total: 5}, err.Error(), nil)
 		return
@@ -52,14 +101,23 @@ func (s *ReportService) runJob(jobID string, req GenerateReportRequest) {
 		s.updateJob(jobID, ReportJobFailed, "player-data", "Failed to decode selected player fight data.", ReportJobProgress{Current: 1, Total: 5}, err.Error(), nil)
 		return
 	}
+	playerCtx, err := s.computeMemberContext(ctx, playerData, req.Character.Class, req.Character.Spec)
+	if err != nil {
+		s.updateJob(jobID, ReportJobFailed, "player-data", "Failed to compute selected player metrics.", ReportJobProgress{Current: 1, Total: 5}, err.Error(), nil)
+		return
+	}
 
 	s.updateJob(jobID, ReportJobRunning, "rankings", "Fetching ranking candidates for the selected boss and spec.", ReportJobProgress{Current: 2, Total: 5}, "", nil)
-	cohortData := make([]json.RawMessage, 0, targetEliteCount)
 	cohortEntries := make([]CohortEntry, 0, targetEliteCount)
+	cohortContexts := make([]analysistypes.MemberContext, 0, targetEliteCount)
+	// EliteData/EliteEntries on the timeline are populated only for members
+	// fetched fresh from log-service this run. Cache-hit members (no raw kept)
+	// contribute to comparison + AI insights but not the per-elite timeline UI.
 	cohortTimelineData := make([]timelineFightData, 0, targetEliteCount)
+	cohortTimelineEntries := make([]CohortEntry, 0, targetEliteCount)
 	processedCandidates := make(map[string]bool)
 
-	for candidateLimit := rankingCandidateBatchCap; len(cohortData) < targetEliteCount && candidateLimit <= rankingCandidateMaxCap; candidateLimit += rankingCandidateBatchCap {
+	for candidateLimit := rankingCandidateBatchCap; len(cohortContexts) < targetEliteCount && candidateLimit <= rankingCandidateMaxCap; candidateLimit += rankingCandidateBatchCap {
 		candidates, err := s.fetchRankingCandidates(ctx, req, candidateLimit)
 		if err != nil {
 			s.updateJob(jobID, ReportJobFailed, "rankings", "Failed to fetch ranking candidates.", ReportJobProgress{Current: 2, Total: 5}, err.Error(), nil)
@@ -78,19 +136,20 @@ func (s *ReportService) runJob(jobID string, req GenerateReportRequest) {
 			processedCandidates[key] = true
 			newCandidates++
 
-			s.updateJob(jobID, ReportJobRunning, "cohort", fmt.Sprintf("Fetching cohort member %d of %d.", len(cohortData)+1, targetEliteCount), ReportJobProgress{Current: len(cohortData) + 1, Total: targetEliteCount}, "", nil)
-			memberData, err := s.getOrFetchCohortMember(ctx, candidate)
+			s.updateJob(jobID, ReportJobRunning, "cohort", fmt.Sprintf("Fetching cohort member %d of %d.", len(cohortContexts)+1, targetEliteCount), ReportJobProgress{Current: len(cohortContexts) + 1, Total: targetEliteCount}, "", nil)
+			memberCtx, memberTimeline, err := s.getOrFetchCohortMemberContext(ctx, candidate, req.Character.Class, req.Character.Spec)
 			if err != nil {
+				log.Printf("cohort member fetch failed for %s: %v", key, err)
 				continue
 			}
-			decodedTimeline, err := decodeTimelineFightData(memberData)
-			if err != nil {
-				continue
+			entry := buildCohortEntry(candidate)
+			cohortEntries = append(cohortEntries, entry)
+			cohortContexts = append(cohortContexts, *memberCtx)
+			if memberTimeline != nil {
+				cohortTimelineData = append(cohortTimelineData, *memberTimeline)
+				cohortTimelineEntries = append(cohortTimelineEntries, entry)
 			}
-			cohortData = append(cohortData, memberData)
-			cohortEntries = append(cohortEntries, buildCohortEntry(candidate))
-			cohortTimelineData = append(cohortTimelineData, decodedTimeline)
-			if len(cohortData) == targetEliteCount {
+			if len(cohortContexts) == targetEliteCount {
 				break
 			}
 			if index == len(candidates)-1 && len(candidates) < candidateLimit {
@@ -101,7 +160,7 @@ func (s *ReportService) runJob(jobID string, req GenerateReportRequest) {
 			break
 		}
 	}
-	if len(cohortData) == 0 {
+	if len(cohortContexts) == 0 {
 		s.updateJob(jobID, ReportJobFailed, "cohort", "Failed to collect any cohort members.", ReportJobProgress{Current: 0, Total: targetEliteCount}, "no cohort member data could be fetched", nil)
 		return
 	}
@@ -110,11 +169,11 @@ func (s *ReportService) runJob(jobID string, req GenerateReportRequest) {
 		Character:    req.Character,
 		PlayerData:   playerTimelineData,
 		EliteData:    cohortTimelineData,
-		EliteEntries: cohortEntries,
+		EliteEntries: cohortTimelineEntries,
 	})
 
 	s.updateJob(jobID, ReportJobRunning, "analyzing", "Running deterministic comparison analysis.", ReportJobProgress{Current: 4, Total: 5}, "", nil)
-	comparison, err := s.fetchComparison(ctx, req, playerData, cohortData)
+	comparison, err := s.fetchComparisonFromContexts(ctx, req, *playerCtx, cohortContexts)
 	if err != nil {
 		s.updateJob(jobID, ReportJobFailed, "analyzing", "Failed to compute deterministic comparison metrics.", ReportJobProgress{Current: 4, Total: 5}, err.Error(), nil)
 		return
@@ -125,7 +184,7 @@ func (s *ReportService) runJob(jobID string, req GenerateReportRequest) {
 		Character:  req.Character,
 		Cohort:     cohortEntries,
 		Comparison: comparison,
-		Warnings:   buildReportWarnings(req, playerTimelineData, cohortTimelineData),
+		Warnings:   buildReportWarnings(req, *playerCtx, cohortContexts),
 		AI: AIReportSection{
 			Available: false,
 			Insights:  []AIInsight{},
@@ -133,7 +192,7 @@ func (s *ReportService) runJob(jobID string, req GenerateReportRequest) {
 	}
 
 	s.updateJob(jobID, ReportJobRunning, "insights", "Generating AI insights.", ReportJobProgress{Current: 5, Total: 5}, "", &response)
-	insights, err := s.fetchInsights(ctx, req, response.Comparison, playerTimelineData, cohortTimelineData)
+	insights, err := s.fetchInsights(ctx, req, response.Comparison, *playerCtx, cohortContexts)
 	if err != nil {
 		fmt.Printf("AI insights unavailable for job %s: %v\n", jobID, err)
 		response.AI.Warning = "AI insights were unavailable. Deterministic metrics are still shown."
@@ -176,21 +235,21 @@ func buildCohortEntry(candidate RankingCandidate) CohortEntry {
 	}
 }
 
-func buildReportWarnings(req GenerateReportRequest, playerData timelineFightData, cohortData []timelineFightData) []ReportWarning {
+func buildReportWarnings(req GenerateReportRequest, playerCtx analysistypes.MemberContext, cohortContexts []analysistypes.MemberContext) []ReportWarning {
 	warnings := make([]ReportWarning, 0, 1)
 
 	playerTalentCode := strings.TrimSpace(req.Character.TalentImportCode)
 	if playerTalentCode == "" {
-		playerTalentCode = strings.TrimSpace(playerData.TalentImportCode)
+		playerTalentCode = strings.TrimSpace(playerCtx.TalentImportCode)
 	}
-	if playerTalentCode == "" || len(cohortData) == 0 {
+	if playerTalentCode == "" || len(cohortContexts) == 0 {
 		return warnings
 	}
 
 	known := 0
 	different := 0
 	cohortTalentCounts := make(map[string]int)
-	for _, cohort := range cohortData {
+	for _, cohort := range cohortContexts {
 		cohortTalentCode := strings.TrimSpace(cohort.TalentImportCode)
 		if cohortTalentCode == "" {
 			continue
@@ -291,15 +350,15 @@ func (s *ReportService) fetchCohortMember(ctx context.Context, candidate Ranking
 	)
 }
 
-func (s *ReportService) fetchComparison(ctx context.Context, req GenerateReportRequest, playerData json.RawMessage, cohortData []json.RawMessage) (ComparisonResult, error) {
+func (s *ReportService) fetchComparisonFromContexts(ctx context.Context, req GenerateReportRequest, playerCtx analysistypes.MemberContext, cohortContexts []analysistypes.MemberContext) (ComparisonResult, error) {
 	var comparison ComparisonResult
 	err := s.postForJSON(
 		ctx,
 		s.analysisClient,
-		s.analysisURL+"/analyze/compare",
-		analysisCompareRequest{
-			PlayerData:     playerData,
-			CohortData:     cohortData,
+		s.analysisURL+"/analyze/compare-contexts",
+		compareContextsRequest{
+			Player:         playerCtx,
+			Cohort:         cohortContexts,
 			CharacterClass: req.Character.Class,
 			CharacterSpec:  req.Character.Spec,
 		},
@@ -309,13 +368,13 @@ func (s *ReportService) fetchComparison(ctx context.Context, req GenerateReportR
 	return comparison, err
 }
 
-func (s *ReportService) fetchInsights(ctx context.Context, req GenerateReportRequest, comparison ComparisonResult, playerData timelineFightData, eliteData []timelineFightData) (insightGenerationResponse, error) {
+func (s *ReportService) fetchInsights(ctx context.Context, req GenerateReportRequest, comparison ComparisonResult, playerCtx analysistypes.MemberContext, cohortContexts []analysistypes.MemberContext) (insightGenerationResponse, error) {
 	var insights insightGenerationResponse
 	err := s.postForJSON(
 		ctx,
 		s.aiClient,
 		s.aiURL+"/insights/generate",
-		buildInsightRequest(req, comparison, playerData, eliteData),
+		buildInsightRequest(req, comparison, playerCtx, cohortContexts),
 		&insights,
 		"ai-service",
 	)
@@ -361,7 +420,7 @@ func (s *ReportService) postForJSON(ctx context.Context, client *http.Client, en
 	return json.Unmarshal(bodyBytes, target)
 }
 
-func buildInsightRequest(req GenerateReportRequest, comparison ComparisonResult, playerData timelineFightData, eliteData []timelineFightData) insightGenerationRequest {
+func buildInsightRequest(req GenerateReportRequest, comparison ComparisonResult, playerCtx analysistypes.MemberContext, cohortContexts []analysistypes.MemberContext) insightGenerationRequest {
 	specProfile, _ := config.SpecProfileFor(req.Character.Class, req.Character.Spec)
 	return insightGenerationRequest{
 		Context: insightContext{
@@ -375,8 +434,8 @@ func buildInsightRequest(req GenerateReportRequest, comparison ComparisonResult,
 			SpecProfile:      specProfile,
 		},
 		Metrics:            nil,
-		AbilityHighlights:  buildAbilityHighlights(comparison.AbilityUsage, 5, req.Character.Class, req.Character.Spec, playerData, eliteData),
-		BuffHighlights:     buildBuffHighlights(comparison.BuffUptimes, 5, req.Character.Class, req.Character.Spec, playerData, eliteData),
+		AbilityHighlights:  buildAbilityHighlights(comparison.AbilityUsage, 5, req.Character.Class, req.Character.Spec, playerCtx, cohortContexts),
+		BuffHighlights:     buildBuffHighlights(comparison.BuffUptimes, 5, req.Character.Class, req.Character.Spec, playerCtx, cohortContexts),
 		ResourceHighlights: buildResourceHighlights(comparison.ResourceUsage, 3),
 	}
 }

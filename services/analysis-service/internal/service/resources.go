@@ -4,22 +4,9 @@ import (
 	"sort"
 	"strings"
 
-	"wow-log-analyzer/services/analysis-service/internal/types"
+	"wow-log-analyzer/services/analysis-service/types"
 )
 
-type resourceUsageSummary struct {
-	ResourceTypeID     int
-	ResourceType       string
-	SampleCount        int
-	FullMarkerCount    int
-	FullWindowSeconds  float64
-	AveragePct         float64
-	TimeAtMaxSeconds   float64
-	Spent              float64
-	GeneratedPerMinute float64
-	WastePerMinute     float64
-	WastePct           float64
-}
 
 type resourceAggregate struct {
 	name              string
@@ -38,16 +25,22 @@ type resourceAggregate struct {
 func (s *AnalysisService) CalculateResourceUsageComparisons(playerData types.PlayerFightData, cohortData []types.PlayerFightData, characterClass, characterSpec string) []types.ResourceUsageComparison {
 	strategy := resolveResourceStrategy(characterClass, characterSpec)
 	playerSummary := summarizeResourceUsage(playerData, strategy)
-	cohortSummaries := make([]map[int]resourceUsageSummary, len(cohortData))
-	resourceNames := make(map[int]string)
+	cohortSummaries := make([]map[int]types.ResourceUsageSummary, len(cohortData))
+	for i, entry := range cohortData {
+		cohortSummaries[i] = summarizeResourceUsage(entry, strategy)
+	}
+	return s.CompareResourceUsages(playerSummary, cohortSummaries, characterClass, characterSpec)
+}
 
+// CompareResourceUsages is the cached-input variant of CalculateResourceUsageComparisons.
+func (s *AnalysisService) CompareResourceUsages(playerSummary map[int]types.ResourceUsageSummary, cohortSummaries []map[int]types.ResourceUsageSummary, characterClass, characterSpec string) []types.ResourceUsageComparison {
+	strategy := resolveResourceStrategy(characterClass, characterSpec)
+	resourceNames := make(map[int]string)
 	for id, summary := range playerSummary {
 		resourceNames[id] = summary.ResourceType
 	}
-
-	for i, entry := range cohortData {
-		cohortSummaries[i] = summarizeResourceUsage(entry, strategy)
-		for id, summary := range cohortSummaries[i] {
+	for _, summaryMap := range cohortSummaries {
+		for id, summary := range summaryMap {
 			if _, exists := resourceNames[id]; !exists {
 				resourceNames[id] = summary.ResourceType
 			}
@@ -158,7 +151,7 @@ func (s *AnalysisService) CalculateResourceUsageComparisons(playerData types.Pla
 	return comparisons
 }
 
-func summarizeResourceUsage(data types.PlayerFightData, strategy resourceStrategy) map[int]resourceUsageSummary {
+func summarizeResourceUsage(data types.PlayerFightData, strategy resourceStrategy) map[int]types.ResourceUsageSummary {
 	durationMinutes := data.FightEnd.Sub(data.FightStart).Minutes()
 	if durationMinutes <= 0 {
 		durationMinutes = 1
@@ -192,7 +185,7 @@ func summarizeResourceUsage(data types.PlayerFightData, strategy resourceStrateg
 	}
 	addDerivedRuneSpend(aggregates, data, strategy)
 
-	summaries := make(map[int]resourceUsageSummary, len(aggregates))
+	summaries := make(map[int]types.ResourceUsageSummary, len(aggregates))
 	for resourceTypeID, entry := range aggregates {
 		sort.Slice(entry.samples, func(i, j int) bool {
 			return entry.samples[i].Timestamp.Before(entry.samples[j].Timestamp)
@@ -253,7 +246,7 @@ func summarizeResourceUsage(data types.PlayerFightData, strategy resourceStrateg
 		if entry.generated > 0 {
 			wastePct = (entry.waste / entry.generated) * 100
 		}
-		summaries[resourceTypeID] = resourceUsageSummary{
+		summaries[resourceTypeID] = types.ResourceUsageSummary{
 			ResourceTypeID:     resourceTypeID,
 			ResourceType:       entry.name,
 			SampleCount:        entry.sampleCount,
@@ -448,7 +441,7 @@ func resourceSet(ids ...int) map[int]bool {
 	return values
 }
 
-func buildResourceCaution(player resourceUsageSummary, cohortGenerated, cohortWastePct float64, strategy resourceStrategy) string {
+func buildResourceCaution(player types.ResourceUsageSummary, cohortGenerated, cohortWastePct float64, strategy resourceStrategy) string {
 	isPrimary := strategy.primaryID != 0 && player.ResourceTypeID == strategy.primaryID
 	switch {
 	case player.WastePct-cohortWastePct >= 5:

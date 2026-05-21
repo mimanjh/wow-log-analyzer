@@ -376,7 +376,7 @@ func (s *AnalyzeService) GetCharactersForFight(reportID string, fightID int) ([]
 }
 
 func (s *AnalyzeService) cachedFights(reportID string) ([]FightSummary, error) {
-	const ttl = 30 * 24 * time.Hour
+	const ttl = 24 * time.Hour
 	key := s.key("report:fights:" + reportID)
 	if s.redisClient != nil {
 		if data, err := s.redisClient.Get(context.Background(), key).Bytes(); err == nil {
@@ -399,7 +399,7 @@ func (s *AnalyzeService) cachedFights(reportID string) ([]FightSummary, error) {
 }
 
 func (s *AnalyzeService) cachedCharacters(reportID string, fightID int) ([]CharacterSummary, error) {
-	const ttl = 30 * 24 * time.Hour
+	const ttl = 24 * time.Hour
 	key := s.key(fmt.Sprintf("report:characters:%s:%d", reportID, fightID))
 	if s.redisClient != nil {
 		if data, err := s.redisClient.Get(context.Background(), key).Bytes(); err == nil {

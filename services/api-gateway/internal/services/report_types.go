@@ -1,7 +1,6 @@
 package services
 
 import (
-	"encoding/json"
 	"time"
 
 	"wow-log-analyzer/services/api-gateway/internal/config"
@@ -301,13 +300,6 @@ type RankingCandidate struct {
 	FightID      int     `json:"fightId"`
 	RankValue    float64 `json:"rankValue"`
 	DurationMS   int     `json:"durationMs"`
-}
-
-type analysisCompareRequest struct {
-	PlayerData     json.RawMessage   `json:"playerData"`
-	CohortData     []json.RawMessage `json:"cohortData"`
-	CharacterClass string            `json:"characterClass,omitempty"`
-	CharacterSpec  string            `json:"characterSpec,omitempty"`
 }
 
 type insightGenerationRequest struct {

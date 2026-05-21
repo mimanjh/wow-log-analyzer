@@ -5,7 +5,7 @@ import (
 	"sort"
 	"time"
 
-	"wow-log-analyzer/services/analysis-service/internal/types"
+	"wow-log-analyzer/services/analysis-service/types"
 )
 
 // calculateCastsPerMinute calculates casts per minute

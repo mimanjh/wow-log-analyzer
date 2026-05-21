@@ -3,9 +3,11 @@ package services
 import (
 	"sort"
 	"strings"
+
+	analysistypes "wow-log-analyzer/services/analysis-service/types"
 )
 
-func buildAbilityHighlights(values []AbilityUsageComparison, limit int, characterClass, characterSpec string, playerData timelineFightData, eliteData []timelineFightData) []insightHighlight {
+func buildAbilityHighlights(values []AbilityUsageComparison, limit int, characterClass, characterSpec string, playerCtx analysistypes.MemberContext, cohortContexts []analysistypes.MemberContext) []insightHighlight {
 	if len(values) == 0 || limit <= 0 {
 		return nil
 	}
@@ -19,8 +21,8 @@ func buildAbilityHighlights(values []AbilityUsageComparison, limit int, characte
 
 	highlights := make([]insightHighlight, 0, limit)
 	for _, value := range filteredValues {
-		playerUseTimes := abilityUseTimesSeconds(playerData, value.AbilityID, 3)
-		eliteUseTimes := eliteMedianUseTimesSeconds(eliteData, value.AbilityID, 3)
+		playerUseTimes := truncateUseTimes(playerCtx.AbilityFirstUseTimes[value.AbilityID], 3)
+		eliteUseTimes := cohortMedianUseTimes(cohortContexts, value.AbilityID, 3)
 		if isHighFrequencyAbility(value) {
 			playerUseTimes = nil
 			eliteUseTimes = nil
@@ -50,7 +52,7 @@ func buildAbilityHighlights(values []AbilityUsageComparison, limit int, characte
 	return highlights
 }
 
-func buildBuffHighlights(values []BuffUptimeComparison, limit int, characterClass, characterSpec string, playerData timelineFightData, eliteData []timelineFightData) []insightHighlight {
+func buildBuffHighlights(values []BuffUptimeComparison, limit int, characterClass, characterSpec string, playerCtx analysistypes.MemberContext, cohortContexts []analysistypes.MemberContext) []insightHighlight {
 	if len(values) == 0 || limit <= 0 {
 		return nil
 	}
@@ -74,8 +76,8 @@ func buildBuffHighlights(values []BuffUptimeComparison, limit int, characterClas
 			EliteTimingSeconds:  value.CohortMedianFirstApply,
 			TimingDeltaSeconds:  value.FirstApplyDeltaSeconds,
 			TimingLabel:         "first apply",
-			PlayerLargestGapSec: largestBuffGapSeconds(playerData, value.AbilityID),
-			EliteLargestGapSec:  medianLargestBuffGapSeconds(eliteData, value.AbilityID),
+			PlayerLargestGapSec: playerCtx.BuffLargestGapSeconds[value.AbilityID],
+			EliteLargestGapSec:  cohortMedianBuffGap(cohortContexts, value.AbilityID),
 			Category:            categories[normalizeTrackedCooldownName(value.AbilityName)],
 		})
 		if len(highlights) == limit {
@@ -216,6 +218,70 @@ func medianLargestBuffGapSeconds(values []timelineFightData, abilityID int) floa
 	samples := make([]float64, 0, len(values))
 	for _, value := range values {
 		samples = append(samples, largestBuffGapSeconds(value, abilityID))
+	}
+	if len(samples) == 0 {
+		return 0
+	}
+	return medianFloat64(samples)
+}
+
+// truncateUseTimes clones the precomputed first-N use times capped at `limit`.
+func truncateUseTimes(values []float64, limit int) []float64 {
+	if limit <= 0 || len(values) == 0 {
+		return nil
+	}
+	if len(values) > limit {
+		values = values[:limit]
+	}
+	out := make([]float64, len(values))
+	copy(out, values)
+	return out
+}
+
+// cohortMedianUseTimes computes the element-wise median of the first-N cast
+// times across cohort members for one ability. Skips members that never cast it.
+func cohortMedianUseTimes(cohortContexts []analysistypes.MemberContext, abilityID, limit int) []float64 {
+	if limit <= 0 {
+		return nil
+	}
+	useTimesByElite := make([][]float64, 0, len(cohortContexts))
+	maxUses := 0
+	for _, ctx := range cohortContexts {
+		useTimes := truncateUseTimes(ctx.AbilityFirstUseTimes[abilityID], limit)
+		if len(useTimes) == 0 {
+			continue
+		}
+		useTimesByElite = append(useTimesByElite, useTimes)
+		if len(useTimes) > maxUses {
+			maxUses = len(useTimes)
+		}
+	}
+	if len(useTimesByElite) == 0 {
+		return nil
+	}
+
+	medians := make([]float64, 0, maxUses)
+	for useIndex := 0; useIndex < maxUses; useIndex++ {
+		samples := make([]float64, 0, len(useTimesByElite))
+		for _, useTimes := range useTimesByElite {
+			if useIndex < len(useTimes) {
+				samples = append(samples, useTimes[useIndex])
+			}
+		}
+		if len(samples) == 0 {
+			continue
+		}
+		medians = append(medians, medianFloat64(samples))
+	}
+	return medians
+}
+
+// cohortMedianBuffGap returns the median largest-gap-seconds across cohort
+// members for one buff. Falls back to 0 when no cohort member tracked the buff.
+func cohortMedianBuffGap(cohortContexts []analysistypes.MemberContext, abilityID int) float64 {
+	samples := make([]float64, 0, len(cohortContexts))
+	for _, ctx := range cohortContexts {
+		samples = append(samples, ctx.BuffLargestGapSeconds[abilityID])
 	}
 	if len(samples) == 0 {
 		return 0

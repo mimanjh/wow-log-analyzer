@@ -1521,6 +1521,16 @@ export function ReportPage() {
     >({});
     const reportJobId = reportJob?.jobId;
     const reportJobStatus = reportJob?.status;
+    const reportJobResult = reportJob?.result;
+
+    // Sync the result onto the store whenever the job carries one. Covers the
+    // cache-hit path where the job arrives already-completed and the polling
+    // loop below never runs.
+    useEffect(() => {
+        if (reportJobResult) {
+            setReportResult(reportJobResult);
+        }
+    }, [reportJobResult, setReportResult]);
 
     useEffect(() => {
         if (

@@ -1,6 +1,10 @@
 package services
 
-import "testing"
+import (
+	"testing"
+
+	analysistypes "wow-log-analyzer/services/analysis-service/types"
+)
 
 func TestBuildInsightRequestAttachesSpecProfile(t *testing.T) {
 	req := GenerateReportRequest{
@@ -19,7 +23,7 @@ func TestBuildInsightRequestAttachesSpecProfile(t *testing.T) {
 		CohortStats: CohortStatistics{SampleSize: 10},
 	}
 
-	insightReq := buildInsightRequest(req, comparison, timelineFightData{}, nil)
+	insightReq := buildInsightRequest(req, comparison, analysistypes.MemberContext{}, nil)
 	if insightReq.Context.SpecProfile.Label != "Blood Death Knight" {
 		t.Fatalf("expected Blood Death Knight spec profile, got %s", insightReq.Context.SpecProfile.Label)
 	}

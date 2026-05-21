@@ -6,7 +6,7 @@ import (
 	"net/http"
 
 	"wow-log-analyzer/services/analysis-service/internal/service"
-	"wow-log-analyzer/services/analysis-service/internal/types"
+	"wow-log-analyzer/services/analysis-service/types"
 )
 
 type AnalysisHandler struct {
@@ -41,6 +41,67 @@ func (h *AnalysisHandler) AnalyzeFight(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(metrics)
+}
+
+// AnalyzeMember computes a MemberContext from raw fight events. api-gateway
+// caches the returned context (~10KB) in place of the raw 1MB payload.
+func (h *AnalysisHandler) AnalyzeMember(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		PlayerData     types.PlayerFightData `json:"playerData"`
+		CharacterClass string                `json:"characterClass"`
+		CharacterSpec  string                `json:"characterSpec"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("Failed to decode /analyze/member request: %v", err)
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	ctx, err := h.analysisService.AnalyzeMember(req.PlayerData, req.CharacterClass, req.CharacterSpec)
+	if err != nil {
+		log.Printf("AnalyzeMember failed: %v", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(ctx)
+}
+
+// CompareContexts builds a ComparisonResult from precomputed MemberContexts —
+// the cached-input path that replaces the raw /analyze/compare flow.
+func (h *AnalysisHandler) CompareContexts(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Player         types.MemberContext   `json:"player"`
+		Cohort         []types.MemberContext `json:"cohort"`
+		CharacterClass string                `json:"characterClass"`
+		CharacterSpec  string                `json:"characterSpec"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("Failed to decode /analyze/compare-contexts request: %v", err)
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	comparison, err := h.analysisService.CompareMemberContexts(req.Player, req.Cohort, req.CharacterClass, req.CharacterSpec)
+	if err != nil {
+		log.Printf("CompareMemberContexts failed: %v", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(comparison)
 }
 
 func (h *AnalysisHandler) CompareFight(w http.ResponseWriter, r *http.Request) {

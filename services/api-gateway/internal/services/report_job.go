@@ -18,12 +18,10 @@ const (
 	jobRedisKeyPrefix = "report:job:"
 	jobRedisTTL       = 30 * 24 * time.Hour
 
-	resultCacheKeyPrefix       = "report:result:"
-	resultCacheTTL             = 30 * 24 * time.Hour
-	playerDataCacheKeyPrefix   = "report:player-data:"
-	playerDataCacheTTL         = 30 * 24 * time.Hour
-	cohortMemberCacheKeyPrefix = "cohort:member:"
-	cohortMemberCacheTTL       = 30 * 24 * time.Hour
+	resultCacheKeyPrefix              = "report:result:"
+	resultCacheTTL                    = 30 * 24 * time.Hour
+	cohortMemberContextCacheKeyPrefix = "cohort:member-ctx:"
+	cohortMemberContextCacheTTL       = 30 * 24 * time.Hour
 
 	usageRedisKeyPrefix = "usage:daily:"
 	DailyAnalysisLimit  = 5

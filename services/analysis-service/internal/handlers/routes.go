@@ -13,6 +13,8 @@ func RegisterRoutes(mux *http.ServeMux, analysisService *service.AnalysisService
 	mux.HandleFunc("/health", healthHandler)
 	mux.HandleFunc("/analyze/fight", handler.AnalyzeFight)
 	mux.HandleFunc("/analyze/compare", handler.CompareFight)
+	mux.HandleFunc("/analyze/member", handler.AnalyzeMember)
+	mux.HandleFunc("/analyze/compare-contexts", handler.CompareContexts)
 }
 
 func rootHandler(w http.ResponseWriter, r *http.Request) {

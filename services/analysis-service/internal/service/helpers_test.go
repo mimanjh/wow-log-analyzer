@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"wow-log-analyzer/services/analysis-service/internal/types"
+	"wow-log-analyzer/services/analysis-service/types"
 )
 
 func TestDeathKnightRuneCost(t *testing.T) {
@@ -129,7 +129,7 @@ func TestBuildResourceCaution(t *testing.T) {
 	strategy := resourceStrategy{primaryID: 3, resourceIDs: map[int]bool{3: true}}
 
 	t.Run("high waste pct on primary resource", func(t *testing.T) {
-		player := resourceUsageSummary{ResourceTypeID: 3, WastePct: 15, GeneratedPerMinute: 100}
+		player := types.ResourceUsageSummary{ResourceTypeID: 3, WastePct: 15, GeneratedPerMinute: 100}
 		caution := buildResourceCaution(player, 100, 9, strategy)
 		if caution == "" {
 			t.Error("expected caution for high waste on primary resource")
@@ -137,7 +137,7 @@ func TestBuildResourceCaution(t *testing.T) {
 	})
 
 	t.Run("high waste pct on non-primary resource", func(t *testing.T) {
-		player := resourceUsageSummary{ResourceTypeID: 99, WastePct: 15, GeneratedPerMinute: 100}
+		player := types.ResourceUsageSummary{ResourceTypeID: 99, WastePct: 15, GeneratedPerMinute: 100}
 		caution := buildResourceCaution(player, 100, 9, strategy)
 		if caution == "" {
 			t.Error("expected caution for high waste")
@@ -145,7 +145,7 @@ func TestBuildResourceCaution(t *testing.T) {
 	})
 
 	t.Run("low generation behind cohort", func(t *testing.T) {
-		player := resourceUsageSummary{ResourceTypeID: 3, WastePct: 2, GeneratedPerMinute: 50}
+		player := types.ResourceUsageSummary{ResourceTypeID: 3, WastePct: 2, GeneratedPerMinute: 50}
 		caution := buildResourceCaution(player, 100, 2, strategy)
 		if caution == "" {
 			t.Error("expected caution for low generation on primary resource")
@@ -153,7 +153,7 @@ func TestBuildResourceCaution(t *testing.T) {
 	})
 
 	t.Run("normal performance returns empty caution", func(t *testing.T) {
-		player := resourceUsageSummary{ResourceTypeID: 3, WastePct: 3, GeneratedPerMinute: 98}
+		player := types.ResourceUsageSummary{ResourceTypeID: 3, WastePct: 3, GeneratedPerMinute: 98}
 		caution := buildResourceCaution(player, 100, 3, strategy)
 		if caution != "" {
 			t.Errorf("expected no caution for normal performance, got %q", caution)

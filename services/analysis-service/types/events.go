@@ -77,14 +77,16 @@ type ResourceEvent struct {
 
 // PlayerFightData contains all events for a single player's fight
 type PlayerFightData struct {
-	PlayerID       int             `json:"playerId"`
-	FightID        int             `json:"fightId"`
-	FightStart     time.Time       `json:"fightStart"`
-	FightEnd       time.Time       `json:"fightEnd"`
-	CastEvents     []CastEvent     `json:"castEvents"`
-	DamageEvents   []DamageEvent   `json:"damageEvents"`
-	HealEvents     []HealEvent     `json:"healEvents"`
-	BuffEvents     []BuffEvent     `json:"buffEvents"`
-	CooldownEvents []CooldownEvent `json:"cooldownEvents"`
-	ResourceEvents []ResourceEvent `json:"resourceEvents"`
+	PlayerID            int             `json:"playerId"`
+	FightID             int             `json:"fightId"`
+	FightStart          time.Time       `json:"fightStart"`
+	FightEnd            time.Time       `json:"fightEnd"`
+	TalentImportCode    string          `json:"talentImportCode,omitempty"`
+	TalentCalculatorURL string          `json:"talentCalculatorUrl,omitempty"`
+	CastEvents          []CastEvent     `json:"castEvents"`
+	DamageEvents        []DamageEvent   `json:"damageEvents"`
+	HealEvents          []HealEvent     `json:"healEvents"`
+	BuffEvents          []BuffEvent     `json:"buffEvents"`
+	CooldownEvents      []CooldownEvent `json:"cooldownEvents"`
+	ResourceEvents      []ResourceEvent `json:"resourceEvents"`
 }
