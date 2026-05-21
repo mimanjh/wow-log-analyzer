@@ -20,7 +20,7 @@ func Load() Config {
 	loadDotEnv()
 
 	return Config{
-		Port:             firstEnv("PORT", "AI_SERVICE_PORT", "8083"),
+		Port:             getEnv("AI_SERVICE_PORT", "8083"),
 		Env:              getEnv("ENV", "development"),
 		Provider:         getEnv("AI_PROVIDER", "disabled"),
 		Model:            getEnv("AI_MODEL", "claude-sonnet-4-6"),

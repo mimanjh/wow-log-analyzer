@@ -16,7 +16,7 @@ type WCLConfig struct {
 
 func Load() Config {
 	return Config{
-		Port: firstEnv("PORT", "LOG_SERVICE_PORT", "8081"),
+		Port: getEnv("LOG_SERVICE_PORT", "8081"),
 		Env:  getEnv("ENV", "development"),
 		WCL: WCLConfig{
 			ClientID:     firstEnv("WCL_CLIENT_ID", "WARCRAFTLOGS_CLIENT_ID", ""),

@@ -9,7 +9,7 @@ type Config struct {
 
 func Load() Config {
 	return Config{
-		Port: firstEnv("PORT", "ANALYSIS_SERVICE_PORT", "8082"),
+		Port: getEnv("ANALYSIS_SERVICE_PORT", "8082"),
 		Env:  getEnv("ENV", "development"),
 	}
 }
