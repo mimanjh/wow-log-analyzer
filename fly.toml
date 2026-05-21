@@ -1,0 +1,46 @@
+# Rename `wow-log-analyzer` below to your chosen Fly app name (must be globally
+# unique). Create it with: fly apps create <your-app-name>
+app = "wow-log-analyzer"
+primary_region = "iad"
+
+[build]
+
+[env]
+  PORT = "8080"
+  ENV = "production"
+
+  # Internal loopback — the consolidated binary runs all four services in one
+  # process; api-gateway calls log/analysis/ai on these localhost ports.
+  LOG_SERVICE_URL = "http://127.0.0.1:8081"
+  ANALYSIS_SERVICE_URL = "http://127.0.0.1:8082"
+  AI_SERVICE_URL = "http://127.0.0.1:8083"
+
+  # Static WCL endpoints
+  WCL_AUTHORIZE_URL = "https://www.warcraftlogs.com/oauth/authorize"
+  WCL_TOKEN_URL = "https://www.warcraftlogs.com/oauth/token"
+
+  # AI provider — flip AI_LIVE_MODEL_ENABLED to "true" when ready to incur
+  # Anthropic API costs in production. Until then, deterministic fallback is used.
+  AI_PROVIDER = "anthropic"
+  AI_MODEL = "claude-sonnet-4-6"
+  AI_LIVE_MODEL_ENABLED = "false"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ["app"]
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+  cpus = 1

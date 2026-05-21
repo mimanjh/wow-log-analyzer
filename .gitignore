@@ -16,6 +16,11 @@ frontend/dist/
 frontend/.vite/
 frontend/coverage/
 
+# Embedded frontend bundle — Docker build copies frontend/dist here; only the
+# placeholder index.html is checked in so local `go build` still compiles.
+services/api-gateway/internal/handlers/web/*
+!services/api-gateway/internal/handlers/web/index.html
+
 # Go
 services/**/server.exe
 services/**/bin/

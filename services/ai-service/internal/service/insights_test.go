@@ -3,8 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -181,10 +179,10 @@ func TestBuildPromptIncludesSpecProfileContext(t *testing.T) {
 	}
 }
 
-func TestNewModelClientRequiresLiveOpenAIConfig(t *testing.T) {
+func TestNewModelClientRequiresLiveAnthropicConfig(t *testing.T) {
 	disabled := newModelClient(config.Config{
-		Provider:         "openai",
-		Model:            "gpt-5-mini",
+		Provider:         "anthropic",
+		Model:            "claude-sonnet-4-6",
 		ModelAPIKey:      "test-key",
 		LiveModelEnabled: false,
 	})
@@ -192,92 +190,51 @@ func TestNewModelClientRequiresLiveOpenAIConfig(t *testing.T) {
 		t.Fatalf("expected disabled model client when live model is disabled")
 	}
 
-	enabled := newModelClient(config.Config{
+	missingKey := newModelClient(config.Config{
+		Provider:         "anthropic",
+		Model:            "claude-sonnet-4-6",
+		LiveModelEnabled: true,
+	})
+	if _, ok := missingKey.(disabledModelClient); !ok {
+		t.Fatalf("expected disabled model client when api key is empty")
+	}
+
+	wrongProvider := newModelClient(config.Config{
 		Provider:         "openai",
 		Model:            "gpt-5-mini",
 		ModelAPIKey:      "test-key",
 		LiveModelEnabled: true,
 	})
-	if _, ok := enabled.(openAIModelClient); !ok {
-		t.Fatalf("expected OpenAI model client when provider, key, and live flag are set")
+	if _, ok := wrongProvider.(disabledModelClient); !ok {
+		t.Fatalf("expected disabled model client for unsupported provider %q", "openai")
+	}
+
+	enabled := newModelClient(config.Config{
+		Provider:         "anthropic",
+		Model:            "claude-sonnet-4-6",
+		ModelAPIKey:      "test-key",
+		LiveModelEnabled: true,
+	})
+	if _, ok := enabled.(anthropicModelClient); !ok {
+		t.Fatalf("expected anthropic model client when provider, key, and live flag are set")
 	}
 }
 
-func TestResponseTextReadsResponsesOutputContent(t *testing.T) {
-	response := openAIResponsesResponse{
-		Output: []struct {
-			Type    string `json:"type"`
-			Content []struct {
-				Type string `json:"type"`
-				Text string `json:"text"`
-			} `json:"content"`
-		}{
-			{
-				Type: "message",
-				Content: []struct {
-					Type string `json:"type"`
-					Text string `json:"text"`
-				}{
-					{Type: "output_text", Text: `{"insights":[]`},
-					{Type: "output_text", Text: `}`},
-				},
-			},
-		},
+func TestInsightResponseSchemaShape(t *testing.T) {
+	schema := insightResponseSchema()
+	if schema["type"] != "object" {
+		t.Fatalf("expected top-level type=object")
 	}
-
-	if got := responseText(response); got != `{"insights":[]}` {
-		t.Fatalf("expected concatenated output content, got %s", got)
+	required, ok := schema["required"].([]string)
+	if !ok {
+		t.Fatalf("expected required as []string")
 	}
-}
-
-func TestOpenAIModelClientGenerateParsesResponsesOutputContent(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			t.Fatalf("expected POST request, got %s", r.Method)
-		}
-		if r.Header.Get("Authorization") != "Bearer test-key" {
-			t.Fatalf("expected bearer auth header")
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-			"model":"gpt-5-mini",
-			"output":[
-				{
-					"type":"message",
-					"content":[
-						{
-							"type":"output_text",
-							"text":"{\"insights\":[{\"metricKey\":\"castsPerMin\",\"title\":\"Tighten casts\",\"summary\":\"Review the cast gap using deterministic comparisons only.\",\"confidence\":\"medium\"},{\"metricKey\":\"buff:uptime\",\"title\":\"Buff window\",\"summary\":\"Buff timing trailed the elite sample.\",\"confidence\":\"high\"},{\"metricKey\":\"resource:runes\",\"title\":\"Rune use\",\"summary\":\"Rune use was below the elite reference.\",\"confidence\":\"medium\"}],\"focusRecommendation\":{\"metricKey\":\"castsPerMin\",\"title\":\"Focus casts\",\"recommendation\":\"Review cast pacing next pull.\",\"reasoning\":\"It is the clearest deterministic gap.\"},\"fallbackUsed\":false,\"model\":\"gpt-5-mini\"}"
-						}
-					]
-				}
-			]
-		}`))
-	}))
-	defer server.Close()
-
-	client := openAIModelClient{
-		apiKey:     "test-key",
-		model:      "gpt-5-mini",
-		baseURL:    server.URL,
-		httpClient: server.Client(),
+	wantRequired := map[string]bool{"insights": true, "focusRecommendation": true, "fallbackUsed": true, "model": true}
+	for _, r := range required {
+		delete(wantRequired, r)
 	}
-
-	response, err := client.Generate(context.Background(), "test prompt", validRequest())
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
-	}
-	if response.FallbackUsed {
-		t.Fatal("expected model response, got fallback")
-	}
-	if response.Model != "gpt-5-mini" {
-		t.Fatalf("expected model gpt-5-mini, got %s", response.Model)
-	}
-	if len(response.Insights) != 3 {
-		t.Fatalf("expected three insights, got %d", len(response.Insights))
-	}
-	if response.FocusRecommendation.MetricKey == "" {
-		t.Fatal("expected focus recommendation")
+	if len(wantRequired) != 0 {
+		t.Fatalf("missing required fields: %v", wantRequired)
 	}
 }
 

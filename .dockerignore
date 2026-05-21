@@ -1,0 +1,32 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Local env — production uses Fly secrets
+.env
+.env.*
+
+# Documentation
+*.md
+.claude/
+
+# Frontend — source is needed for the in-image build stage; skip caches.
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/coverage/
+
+# Build outputs
+bin/
+*.exe
+**/server.exe
+**/__debug_bin*
+
+# IDE
+.idea/
+.vscode/
+
+# Caches
+**/.gocache/
+**/coverage.out

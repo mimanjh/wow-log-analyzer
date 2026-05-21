@@ -23,8 +23,8 @@ func Load() Config {
 		Port:             firstEnv("PORT", "AI_SERVICE_PORT", "8083"),
 		Env:              getEnv("ENV", "development"),
 		Provider:         getEnv("AI_PROVIDER", "disabled"),
-		Model:            firstEnv("AI_MODEL", "OPENAI_MODEL", "fallback-only"),
-		ModelAPIKey:      firstEnv("AI_MODEL_API_KEY", "OPENAI_API_KEY", ""),
+		Model:            getEnv("AI_MODEL", "claude-sonnet-4-6"),
+		ModelAPIKey:      firstEnv("ANTHROPIC_API_KEY", "AI_MODEL_API_KEY", ""),
 		LiveModelEnabled: parseBoolEnv("AI_LIVE_MODEL_ENABLED", false),
 	}
 }
