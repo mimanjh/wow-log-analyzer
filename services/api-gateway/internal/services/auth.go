@@ -66,6 +66,8 @@ func NewAuthService(cfg config.Config, redisClient *redis.Client) *AuthService {
 	}
 }
 
+func (s *AuthService) key(suffix string) string { return s.cfg.RedisKeyPrefix + suffix }
+
 func (s *AuthService) BuildLoginURL() (string, error) {
 	state := randomToken(16)
 
@@ -199,7 +201,7 @@ func (s *AuthService) DeleteSession(sessionID string) {
 	s.mu.Unlock()
 
 	if s.redisClient != nil {
-		s.redisClient.Del(context.Background(), sessionRedisKeyPrefix+sessionID)
+		s.redisClient.Del(context.Background(), s.key(sessionRedisKeyPrefix+sessionID))
 	}
 }
 
@@ -216,7 +218,7 @@ func (s *AuthService) persistSessionToRedis(session SessionState) {
 		log.Printf("Failed to marshal session %s for Redis: %v", session.ID, err)
 		return
 	}
-	if err := s.redisClient.Set(context.Background(), sessionRedisKeyPrefix+session.ID, data, ttl).Err(); err != nil {
+	if err := s.redisClient.Set(context.Background(), s.key(sessionRedisKeyPrefix+session.ID), data, ttl).Err(); err != nil {
 		log.Printf("Failed to persist session %s to Redis: %v", session.ID, err)
 	}
 }
@@ -225,7 +227,7 @@ func (s *AuthService) loadSessionFromRedis(sessionID string) (SessionState, erro
 	if s.redisClient == nil {
 		return SessionState{}, fmt.Errorf("no redis client")
 	}
-	data, err := s.redisClient.Get(context.Background(), sessionRedisKeyPrefix+sessionID).Bytes()
+	data, err := s.redisClient.Get(context.Background(), s.key(sessionRedisKeyPrefix+sessionID)).Bytes()
 	if err != nil {
 		return SessionState{}, err
 	}

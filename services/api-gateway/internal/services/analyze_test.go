@@ -20,7 +20,7 @@ func (s *stubLogClient) GetCharacters(string, int) ([]CharacterSummary, error) {
 }
 
 func TestAnalyzeService_ValidateAndParseUrl(t *testing.T) {
-	service := NewAnalyzeService("http://example.com", nil)
+	service := NewAnalyzeService("http://example.com", nil, "")
 
 	tests := []struct {
 		name string

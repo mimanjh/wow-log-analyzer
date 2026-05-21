@@ -169,14 +169,18 @@ func (c *LogServiceClient) GetCharacters(reportID string, fightID int) ([]Charac
 type AnalyzeService struct {
 	logClient   logDataClient
 	redisClient *redis.Client
+	keyPrefix   string
 }
 
-func NewAnalyzeService(logServiceURL string, redisClient *redis.Client) *AnalyzeService {
+func NewAnalyzeService(logServiceURL string, redisClient *redis.Client, keyPrefix string) *AnalyzeService {
 	return &AnalyzeService{
 		logClient:   NewLogServiceClient(logServiceURL),
 		redisClient: redisClient,
+		keyPrefix:   keyPrefix,
 	}
 }
+
+func (s *AnalyzeService) key(suffix string) string { return s.keyPrefix + suffix }
 
 func (s *AnalyzeService) ValidateAndParseUrl(rawUrl string) UrlValidationResult {
 	trimmed := strings.TrimSpace(rawUrl)
@@ -373,7 +377,7 @@ func (s *AnalyzeService) GetCharactersForFight(reportID string, fightID int) ([]
 
 func (s *AnalyzeService) cachedFights(reportID string) ([]FightSummary, error) {
 	const ttl = 30 * 24 * time.Hour
-	key := "report:fights:" + reportID
+	key := s.key("report:fights:" + reportID)
 	if s.redisClient != nil {
 		if data, err := s.redisClient.Get(context.Background(), key).Bytes(); err == nil {
 			var fights []FightSummary
@@ -396,7 +400,7 @@ func (s *AnalyzeService) cachedFights(reportID string) ([]FightSummary, error) {
 
 func (s *AnalyzeService) cachedCharacters(reportID string, fightID int) ([]CharacterSummary, error) {
 	const ttl = 30 * 24 * time.Hour
-	key := fmt.Sprintf("report:characters:%s:%d", reportID, fightID)
+	key := s.key(fmt.Sprintf("report:characters:%s:%d", reportID, fightID))
 	if s.redisClient != nil {
 		if data, err := s.redisClient.Get(context.Background(), key).Bytes(); err == nil {
 			var characters []CharacterSummary

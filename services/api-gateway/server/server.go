@@ -49,10 +49,10 @@ func Run() error {
 		stripe.Key = cfg.StripeSecretKey
 	}
 
-	analyzeService := services.NewAnalyzeService(cfg.LogServiceURL, redisClient)
-	reportService := services.NewReportService(cfg.LogServiceURL, cfg.AnalysisServiceURL, cfg.AIServiceURL, redisClient)
+	analyzeService := services.NewAnalyzeService(cfg.LogServiceURL, redisClient, cfg.RedisKeyPrefix)
+	reportService := services.NewReportService(cfg.LogServiceURL, cfg.AnalysisServiceURL, cfg.AIServiceURL, redisClient, cfg.RedisKeyPrefix)
 	authService := services.NewAuthService(cfg, redisClient)
-	browserService := services.NewBrowserService(cfg.LogServiceURL, redisClient)
+	browserService := services.NewBrowserService(cfg.LogServiceURL, redisClient, cfg.RedisKeyPrefix)
 	billingService := services.NewBillingService(
 		accountService,
 		cfg.StripeWebhookSecret,

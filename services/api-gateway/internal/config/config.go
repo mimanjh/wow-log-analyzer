@@ -18,6 +18,7 @@ type Config struct {
 	WCLTokenURL         string
 	WCLRedirectURL      string
 	RedisURL            string
+	RedisKeyPrefix      string
 	DatabaseURL         string
 	StripeSecretKey     string
 	StripeWebhookSecret string
@@ -38,6 +39,7 @@ func Load() Config {
 		WCLTokenURL:         getEnv("WCL_TOKEN_URL", "https://www.warcraftlogs.com/oauth/token"),
 		WCLRedirectURL:      getEnv("WCL_REDIRECT_URL", "http://localhost:8080/api/auth/callback"),
 		RedisURL:            getEnv("REDIS_URL", "redis://localhost:6379"),
+		RedisKeyPrefix:      getEnv("REDIS_KEY_PREFIX", "wowla:"),
 		DatabaseURL:         buildDatabaseURL(),
 		StripeSecretKey:     getEnv("STRIPE_SECRET_KEY", ""),
 		StripeWebhookSecret: getEnv("STRIPE_WEBHOOK_SECRET", ""),

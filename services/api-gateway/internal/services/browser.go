@@ -55,15 +55,19 @@ type BrowserService struct {
 	baseURL     string
 	httpClient  *http.Client
 	redisClient *redis.Client
+	keyPrefix   string
 }
 
-func NewBrowserService(logServiceURL string, redisClient *redis.Client) *BrowserService {
+func NewBrowserService(logServiceURL string, redisClient *redis.Client, keyPrefix string) *BrowserService {
 	return &BrowserService{
 		baseURL:     logServiceURL,
 		httpClient:  &http.Client{Timeout: 150 * time.Second},
 		redisClient: redisClient,
+		keyPrefix:   keyPrefix,
 	}
 }
+
+func (s *BrowserService) key(suffix string) string { return s.keyPrefix + suffix }
 
 func (s *BrowserService) GetCurrentUser(accessToken string) (*AuthUser, error) {
 	req, err := http.NewRequest(http.MethodGet, s.baseURL+"/user/profile", nil)
@@ -92,7 +96,7 @@ func (s *BrowserService) GetCurrentUser(accessToken string) (*AuthUser, error) {
 }
 
 func (s *BrowserService) GetCharacters(accessToken, sessionID string) ([]BrowserCharacter, error) {
-	cacheKey := "browser:characters:" + sessionID
+	cacheKey := s.key("browser:characters:" + sessionID)
 	if s.redisClient != nil && sessionID != "" {
 		if data, err := s.redisClient.Get(context.Background(), cacheKey).Bytes(); err == nil {
 			var cached []BrowserCharacter
@@ -141,7 +145,7 @@ func (s *BrowserService) GetCharacterReports(accessToken, sessionID string, char
 		limit = 10
 	}
 
-	cacheKey := fmt.Sprintf("browser:reports:%s:%d:%s:%d", sessionID, characterID, cursor, limit)
+	cacheKey := s.key(fmt.Sprintf("browser:reports:%s:%d:%s:%d", sessionID, characterID, cursor, limit))
 	if s.redisClient != nil && sessionID != "" {
 		if data, err := s.redisClient.Get(context.Background(), cacheKey).Bytes(); err == nil {
 			var cached CharacterReportsPage

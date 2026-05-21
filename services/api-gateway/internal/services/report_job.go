@@ -37,9 +37,10 @@ type ReportService struct {
 	analysisURL    string
 	aiURL          string
 
-	jobMu      sync.RWMutex
-	jobs       map[string]ReportJob
+	jobMu       sync.RWMutex
+	jobs        map[string]ReportJob
 	redisClient *redis.Client
+	keyPrefix   string
 }
 
 const (
@@ -48,7 +49,7 @@ const (
 	rankingCandidateMaxCap   = 100
 )
 
-func NewReportService(logURL, analysisURL, aiURL string, redisClient *redis.Client) *ReportService {
+func NewReportService(logURL, analysisURL, aiURL string, redisClient *redis.Client, keyPrefix string) *ReportService {
 	const serviceTimeout = 120 * time.Second
 
 	return &ReportService{
@@ -60,8 +61,11 @@ func NewReportService(logURL, analysisURL, aiURL string, redisClient *redis.Clie
 		aiURL:          aiURL,
 		jobs:           make(map[string]ReportJob),
 		redisClient:    redisClient,
+		keyPrefix:      keyPrefix,
 	}
 }
+
+func (s *ReportService) key(suffix string) string { return s.keyPrefix + suffix }
 
 func (s *ReportService) CreateJob(req GenerateReportRequest) (ReportJob, error) {
 	if req.ReportID == "" {
@@ -119,7 +123,7 @@ func (s *ReportService) GetJob(jobID string) (ReportJob, error) {
 	}
 
 	if s.redisClient != nil {
-		data, err := s.redisClient.Get(context.Background(), jobRedisKeyPrefix+jobID).Bytes()
+		data, err := s.redisClient.Get(context.Background(), s.key(jobRedisKeyPrefix+jobID)).Bytes()
 		if err == nil {
 			var cached ReportJob
 			if err := json.Unmarshal(data, &cached); err == nil {
@@ -140,7 +144,7 @@ func (s *ReportService) persistJobToRedis(job ReportJob) {
 		log.Printf("Failed to marshal job %s for Redis: %v", job.ID, err)
 		return
 	}
-	if err := s.redisClient.Set(context.Background(), jobRedisKeyPrefix+job.ID, data, jobRedisTTL).Err(); err != nil {
+	if err := s.redisClient.Set(context.Background(), s.key(jobRedisKeyPrefix+job.ID), data, jobRedisTTL).Err(); err != nil {
 		log.Printf("Failed to persist job %s to Redis: %v", job.ID, err)
 	}
 }
@@ -153,7 +157,7 @@ func (s *ReportService) getCachedResult(req GenerateReportRequest) (GenerateRepo
 	if s.redisClient == nil {
 		return GenerateReportResponse{}, false
 	}
-	data, err := s.redisClient.Get(context.Background(), resultCacheKey(req.ReportID, req.Fight.ID, req.Character.ID)).Bytes()
+	data, err := s.redisClient.Get(context.Background(), s.key(resultCacheKey(req.ReportID, req.Fight.ID, req.Character.ID))).Bytes()
 	if err != nil {
 		return GenerateReportResponse{}, false
 	}
@@ -173,7 +177,7 @@ func (s *ReportService) setCachedResult(req GenerateReportRequest, result Genera
 		log.Printf("Failed to marshal result for caching: %v", err)
 		return
 	}
-	if err := s.redisClient.Set(context.Background(), resultCacheKey(req.ReportID, req.Fight.ID, req.Character.ID), data, resultCacheTTL).Err(); err != nil {
+	if err := s.redisClient.Set(context.Background(), s.key(resultCacheKey(req.ReportID, req.Fight.ID, req.Character.ID)), data, resultCacheTTL).Err(); err != nil {
 		log.Printf("Failed to cache result for %s fight=%d char=%d: %v", req.ReportID, req.Fight.ID, req.Character.ID, err)
 	}
 }
@@ -188,7 +192,7 @@ func (s *ReportService) CheckAndIncrementDailyUsage(ctx context.Context, userID,
 		return true, 0, nil
 	}
 	today := time.Now().UTC().Format("2006-01-02")
-	key := fmt.Sprintf("%s%d:%s", usageRedisKeyPrefix, userID, today)
+	key := s.key(fmt.Sprintf("%s%d:%s", usageRedisKeyPrefix, userID, today))
 
 	count, err := s.redisClient.Incr(ctx, key).Result()
 	if err != nil {

@@ -13,7 +13,7 @@ import (
 )
 
 func (s *ReportService) getOrFetchPlayerData(ctx context.Context, req GenerateReportRequest) (json.RawMessage, error) {
-	key := fmt.Sprintf("%s%s:%d:%d", playerDataCacheKeyPrefix, req.ReportID, req.Fight.ID, req.Character.ID)
+	key := s.key(fmt.Sprintf("%s%s:%d:%d", playerDataCacheKeyPrefix, req.ReportID, req.Fight.ID, req.Character.ID))
 	if data, ok := s.getCachedRaw(ctx, key); ok {
 		return data, nil
 	}
@@ -26,7 +26,7 @@ func (s *ReportService) getOrFetchPlayerData(ctx context.Context, req GenerateRe
 }
 
 func (s *ReportService) getOrFetchCohortMember(ctx context.Context, candidate RankingCandidate) (json.RawMessage, error) {
-	key := cohortMemberCacheKeyPrefix + rankingCandidateKey(candidate)
+	key := s.key(cohortMemberCacheKeyPrefix + rankingCandidateKey(candidate))
 	if data, ok := s.getCachedRaw(ctx, key); ok {
 		return data, nil
 	}
