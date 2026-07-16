@@ -30,6 +30,14 @@ const (
 
 	// maxEventPages caps the events pagination loop (10k events per page).
 	maxEventPages = 40
+
+	// maxRequestAttempts bounds retries for transient WCL failures
+	// (network errors, 429, 5xx) with linear backoff between attempts.
+	maxRequestAttempts = 3
+
+	// maxConcurrentRequests limits in-flight WCL calls so cohort fan-out
+	// doesn't burn through the API points budget in bursts.
+	maxConcurrentRequests = 4
 )
 
 type graphqlErrorResponse struct {
@@ -56,6 +64,7 @@ type WCLClient interface {
 type WCLHTTPClient struct {
 	config      config.WCLConfig
 	httpClient  httpDoer
+	sem         chan struct{}
 	tokenMu     sync.Mutex
 	token       string
 	tokenExpiry time.Time
@@ -70,6 +79,7 @@ func NewWCLClient(cfg config.WCLConfig) WCLClient {
 		httpClient: &http.Client{
 			Timeout: requestTimeout,
 		},
+		sem: make(chan struct{}, maxConcurrentRequests),
 	}
 }
 
@@ -340,9 +350,44 @@ func (c *WCLHTTPClient) makeAuthorizedGraphQLRequest(ctx context.Context, endpoi
 		return fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(jsonData))
+	var lastErr error
+	for attempt := 1; attempt <= maxRequestAttempts; attempt++ {
+		if attempt > 1 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(time.Duration(attempt-1) * 750 * time.Millisecond):
+			}
+		}
+
+		retryable, err := c.doGraphQLAttempt(ctx, endpoint, accessToken, jsonData, response)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if !retryable {
+			return err
+		}
+	}
+	return lastErr
+}
+
+// doGraphQLAttempt performs one request, reporting whether a failure is
+// worth retrying (network errors, 429, 5xx). The concurrency semaphore is
+// held only for the duration of the attempt.
+func (c *WCLHTTPClient) doGraphQLAttempt(ctx context.Context, endpoint, accessToken string, jsonData []byte, response interface{}) (bool, error) {
+	if c.sem != nil {
+		select {
+		case c.sem <- struct{}{}:
+			defer func() { <-c.sem }()
+		case <-ctx.Done():
+			return false, ctx.Err()
+		}
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(jsonData))
 	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
+		return false, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -351,25 +396,26 @@ func (c *WCLHTTPClient) makeAuthorizedGraphQLRequest(ctx context.Context, endpoi
 	} else if c.config.ClientID != "" && c.config.ClientSecret != "" {
 		token, err := c.getAccessToken(ctx)
 		if err != nil {
-			return err
+			return ctx.Err() == nil, err
 		}
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("request failed: %w", err)
+		return ctx.Err() == nil, fmt.Errorf("request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
-		return fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
+		retryable := resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500
+		return retryable, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodyBytes))
 	if err != nil {
-		return fmt.Errorf("failed to read response body: %w", err)
+		return ctx.Err() == nil, fmt.Errorf("failed to read response body: %w", err)
 	}
 
 	var graphqlErr graphqlErrorResponse
@@ -381,16 +427,16 @@ func (c *WCLHTTPClient) makeAuthorizedGraphQLRequest(ctx context.Context, endpoi
 			}
 		}
 		if len(messages) > 0 {
-			return fmt.Errorf("graphql errors: %s", strings.Join(messages, "; "))
+			return false, fmt.Errorf("graphql errors: %s", strings.Join(messages, "; "))
 		}
-		return fmt.Errorf("graphql request failed with unknown errors")
+		return false, fmt.Errorf("graphql request failed with unknown errors")
 	}
 
 	if err := json.Unmarshal(body, response); err != nil {
-		return fmt.Errorf("failed to decode response: %w", err)
+		return false, fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	return nil
+	return false, nil
 }
 
 func (c *WCLHTTPClient) GetCurrentUser(ctx context.Context, accessToken string) (*types.UserProfile, error) {
@@ -901,16 +947,9 @@ func (c *WCLHTTPClient) fetchEncounterRankingsPage(ctx context.Context, encounte
 		} `json:"data"`
 	}
 
-	var err error
-	for attempt := 1; attempt <= 3; attempt++ {
-		err = c.makeGraphQLRequest(ctx, query, variables, &response)
-		if err == nil {
-			break
-		}
-		if !isRetryableWCLFailure(err) || attempt == 3 {
-			return nil, fmt.Errorf("failed to fetch encounter rankings: %w", err)
-		}
-		time.Sleep(time.Duration(attempt) * 750 * time.Millisecond)
+	// Transient failures are retried inside makeGraphQLRequest.
+	if err := c.makeGraphQLRequest(ctx, query, variables, &response); err != nil {
+		return nil, fmt.Errorf("failed to fetch encounter rankings: %w", err)
 	}
 	if response.Data.WorldData.Encounter.CharacterRankings.Error != "" {
 		return nil, fmt.Errorf("warcraft logs rankings query failed: %s", response.Data.WorldData.Encounter.CharacterRankings.Error)

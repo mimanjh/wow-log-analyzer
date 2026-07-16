@@ -57,8 +57,12 @@ func newModelClient(cfg config.Config) ModelClient {
 	}
 
 	return anthropicModelClient{
-		client: anthropic.NewClient(option.WithAPIKey(cfg.ModelAPIKey)),
-		model:  anthropic.Model(model),
+		client: anthropic.NewClient(
+			option.WithAPIKey(cfg.ModelAPIKey),
+			// Retry transient failures (429/5xx) with the SDK's backoff.
+			option.WithMaxRetries(3),
+		),
+		model: anthropic.Model(model),
 	}
 }
 
