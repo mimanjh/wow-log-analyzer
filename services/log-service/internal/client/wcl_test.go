@@ -479,3 +479,73 @@ func TestNormalizeMatchKeys_IgnoreFormattingDifferences(t *testing.T) {
 		t.Fatalf("expected spec match keys to ignore punctuation differences")
 	}
 }
+
+// sequencedHTTPClient returns canned responses in order, recording call count.
+type sequencedHTTPClient struct {
+	statusCodes []int
+	bodies      []string
+	calls       int
+}
+
+func (m *sequencedHTTPClient) Do(req *http.Request) (*http.Response, error) {
+	index := m.calls
+	if index >= len(m.statusCodes) {
+		index = len(m.statusCodes) - 1
+	}
+	m.calls++
+	return &http.Response{
+		StatusCode: m.statusCodes[index],
+		Body:       io.NopCloser(bytes.NewReader([]byte(m.bodies[index]))),
+		Header:     make(http.Header),
+	}, nil
+}
+
+func TestMakeGraphQLRequest_RetriesTransientFailures(t *testing.T) {
+	successBody := `{"data":{"reportData":{"report":{"code":"ABC123"}}}}`
+	mock := &sequencedHTTPClient{
+		statusCodes: []int{502, 429, 200},
+		bodies:      []string{"bad gateway", "slow down", successBody},
+	}
+	client := &WCLHTTPClient{
+		config:     config.WCLConfig{BaseURL: "https://www.warcraftlogs.com/api/v2"},
+		httpClient: mock,
+	}
+
+	var response struct {
+		Data struct {
+			ReportData struct {
+				Report struct {
+					Code string `json:"code"`
+				} `json:"report"`
+			} `json:"reportData"`
+		} `json:"data"`
+	}
+	if err := client.makeGraphQLRequest(context.Background(), "query { }", nil, &response); err != nil {
+		t.Fatalf("expected success after retries, got %v", err)
+	}
+	if mock.calls != 3 {
+		t.Errorf("expected 3 attempts, got %d", mock.calls)
+	}
+	if response.Data.ReportData.Report.Code != "ABC123" {
+		t.Errorf("unexpected decoded response: %+v", response)
+	}
+}
+
+func TestMakeGraphQLRequest_DoesNotRetryClientErrors(t *testing.T) {
+	mock := &sequencedHTTPClient{
+		statusCodes: []int{400},
+		bodies:      []string{"bad request"},
+	}
+	client := &WCLHTTPClient{
+		config:     config.WCLConfig{BaseURL: "https://www.warcraftlogs.com/api/v2"},
+		httpClient: mock,
+	}
+
+	var response struct{}
+	if err := client.makeGraphQLRequest(context.Background(), "query { }", nil, &response); err == nil {
+		t.Fatal("expected error for 400 response")
+	}
+	if mock.calls != 1 {
+		t.Errorf("expected exactly 1 attempt for a 400, got %d", mock.calls)
+	}
+}

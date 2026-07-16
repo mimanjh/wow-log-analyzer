@@ -577,14 +577,6 @@ func normalizedFightFromSelection(selection types.FightSelection) types.Normaliz
 	}
 }
 
-func isRetryableWCLFailure(err error) bool {
-	message := strings.ToLower(err.Error())
-	return strings.Contains(message, "status 504") ||
-		strings.Contains(message, "status 503") ||
-		strings.Contains(message, "status 502") ||
-		strings.Contains(message, "timeout")
-}
-
 func classNameFromID(classID int) string {
 	switch classID {
 	case 1:
@@ -1002,4 +994,3 @@ func parseCharacterReportsCursor(cursor string) (int, int) {
 func formatCharacterReportsCursor(page, offset int) string {
 	return fmt.Sprintf("%d:%d", page, offset)
 }
-
