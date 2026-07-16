@@ -18,9 +18,15 @@ const (
 	jobRedisKeyPrefix = "report:job:"
 	jobRedisTTL       = 30 * 24 * time.Hour
 
-	resultCacheKeyPrefix              = "report:result:"
+	// resultCacheSchemaVersion tags cached report results and cohort member
+	// contexts. Bump it whenever metric computation, comparison logic, or the
+	// result/member-context shape changes — otherwise deploys keep serving
+	// stale precomputed reports for up to the 30-day TTL.
+	resultCacheSchemaVersion = "v1"
+
+	resultCacheKeyPrefix              = "report:result:" + resultCacheSchemaVersion + ":"
 	resultCacheTTL                    = 30 * 24 * time.Hour
-	cohortMemberContextCacheKeyPrefix = "cohort:member-ctx:"
+	cohortMemberContextCacheKeyPrefix = "cohort:member-ctx:" + resultCacheSchemaVersion + ":"
 	cohortMemberContextCacheTTL       = 30 * 24 * time.Hour
 
 	usageRedisKeyPrefix = "usage:daily:"
