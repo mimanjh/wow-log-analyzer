@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { Link, Outlet, useNavigate } from "react-router-dom";
-import { createCheckoutSession, getAuthStatus, logout } from "../../lib/api";
+import { getAuthStatus, logout } from "../../lib/api";
 import { useBrowserStore } from "../../stores/useBrowserStore";
 import { Button } from "../ui/Button";
 
@@ -52,9 +52,8 @@ export function AppShell() {
     }, [setAuth, setError, setLoadingState]);
 
     function handleUpgrade() {
-        // Stripe checkout isn't wired up yet — keep the createCheckoutSession
-        // import around so we can flip back here when it is.
-        void createCheckoutSession;
+        // Stripe checkout isn't wired up yet — call createCheckoutSession
+        // from lib/api here when it is.
         window.alert(
             "Pro upgrades aren't available yet — we're working on it. Check back soon!",
         );
