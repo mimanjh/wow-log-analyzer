@@ -45,59 +45,8 @@ func NewAccountService(db *pgxpool.Pool) *AccountService {
 	return &AccountService{db: db}
 }
 
-// Migrate creates or evolves the accounts and subscriptions schema. Idempotent.
-func (s *AccountService) Migrate(ctx context.Context) error {
-	stmts := []string{
-		`CREATE TABLE IF NOT EXISTS accounts (
-			id                 SERIAL       PRIMARY KEY,
-			wcl_user_id        INTEGER      NOT NULL UNIQUE,
-			name               TEXT         NOT NULL,
-			battle_tag         TEXT         NOT NULL DEFAULT '',
-			tier               TEXT         NOT NULL DEFAULT 'free',
-			stripe_customer_id TEXT,
-			created_at         TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-			updated_at         TIMESTAMPTZ  NOT NULL DEFAULT NOW()
-		)`,
-		`ALTER TABLE accounts ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT`,
-		`CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_stripe_customer_id
-			ON accounts(stripe_customer_id) WHERE stripe_customer_id IS NOT NULL`,
-		`CREATE TABLE IF NOT EXISTS subscriptions (
-			id                     SERIAL       PRIMARY KEY,
-			account_id             INTEGER      NOT NULL REFERENCES accounts(id),
-			stripe_customer_id     TEXT         NOT NULL,
-			stripe_subscription_id TEXT         NOT NULL UNIQUE,
-			stripe_price_id        TEXT         NOT NULL DEFAULT '',
-			status                 TEXT         NOT NULL DEFAULT 'inactive',
-			current_period_end     TIMESTAMPTZ,
-			created_at             TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-			updated_at             TIMESTAMPTZ  NOT NULL DEFAULT NOW()
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_subscriptions_account_id ON subscriptions(account_id)`,
-		`CREATE TABLE IF NOT EXISTS user_reports (
-			id              SERIAL      PRIMARY KEY,
-			account_id      INTEGER     NOT NULL REFERENCES accounts(id),
-			report_id       TEXT        NOT NULL,
-			fight_id        INTEGER     NOT NULL,
-			character_id    INTEGER     NOT NULL,
-			encounter_name  TEXT        NOT NULL DEFAULT '',
-			difficulty      TEXT        NOT NULL DEFAULT '',
-			character_name  TEXT        NOT NULL DEFAULT '',
-			character_class TEXT        NOT NULL DEFAULT '',
-			character_spec  TEXT        NOT NULL DEFAULT '',
-			analyzed_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
-		)`,
-		`CREATE UNIQUE INDEX IF NOT EXISTS idx_user_reports_unique
-			ON user_reports(account_id, report_id, fight_id, character_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_user_reports_account_recent
-			ON user_reports(account_id, analyzed_at DESC)`,
-	}
-	for _, stmt := range stmts {
-		if _, err := s.db.Exec(ctx, stmt); err != nil {
-			return fmt.Errorf("migration failed: %w", err)
-		}
-	}
-	return nil
-}
+// Migrate lives in migrations.go — it applies the ordered, recorded schema
+// history in the package-level migrations slice.
 
 // GetOrCreate upserts the account on every login; tier and stripe fields are never overwritten.
 func (s *AccountService) GetOrCreate(ctx context.Context, wclUserID int, name, battleTag string) (*Account, error) {
