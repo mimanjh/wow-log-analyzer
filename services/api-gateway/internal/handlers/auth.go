@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"wow-log-analyzer/services/api-gateway/internal/config"
 	"wow-log-analyzer/services/api-gateway/internal/services"
@@ -53,11 +54,17 @@ func (h *AuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	maxAge := int(time.Until(session.ExpiresAt).Seconds())
+	if maxAge < 0 {
+		maxAge = 0
+	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     "wowlog_session",
 		Value:    session.ID,
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   h.cfg.Env == "production",
+		MaxAge:   maxAge,
 		SameSite: http.SameSiteLaxMode,
 	})
 
@@ -111,6 +118,7 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   h.cfg.Env == "production",
 		MaxAge:   -1,
 		SameSite: http.SameSiteLaxMode,
 	})

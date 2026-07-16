@@ -4,12 +4,20 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 
 	"wow-log-analyzer/services/log-service/internal/service"
 	"wow-log-analyzer/services/log-service/internal/types"
 )
+
+// WCL report codes are alphanumeric; anonymous reports carry an "a:" prefix.
+var reportIDPattern = regexp.MustCompile(`^[A-Za-z0-9:]{4,64}$`)
+
+func validReportID(reportID string) bool {
+	return reportIDPattern.MatchString(reportID)
+}
 
 type Handler struct {
 	logService *service.LogService
@@ -28,8 +36,8 @@ func (h *Handler) GetReportMetadata(w http.ResponseWriter, r *http.Request) {
 	}
 
 	reportID := strings.TrimPrefix(r.URL.Path, "/reports/")
-	if reportID == "" {
-		http.Error(w, "Report ID is required", http.StatusBadRequest)
+	if !validReportID(reportID) {
+		http.Error(w, "A valid report ID is required", http.StatusBadRequest)
 		return
 	}
 
@@ -51,8 +59,8 @@ func (h *Handler) GetFights(w http.ResponseWriter, r *http.Request) {
 
 	reportID := strings.TrimPrefix(r.URL.Path, "/reports/")
 	reportID = strings.TrimSuffix(reportID, "/fights")
-	if reportID == "" {
-		http.Error(w, "Report ID is required", http.StatusBadRequest)
+	if !validReportID(reportID) {
+		http.Error(w, "A valid report ID is required", http.StatusBadRequest)
 		return
 	}
 
@@ -74,8 +82,8 @@ func (h *Handler) GetCharacters(w http.ResponseWriter, r *http.Request) {
 
 	reportID := strings.TrimPrefix(r.URL.Path, "/reports/")
 	reportID = strings.TrimSuffix(reportID, "/characters")
-	if reportID == "" {
-		http.Error(w, "Report ID is required", http.StatusBadRequest)
+	if !validReportID(reportID) {
+		http.Error(w, "A valid report ID is required", http.StatusBadRequest)
 		return
 	}
 
@@ -109,8 +117,8 @@ func (h *Handler) GetComparisonData(w http.ResponseWriter, r *http.Request) {
 
 	reportID := strings.TrimPrefix(r.URL.Path, "/reports/")
 	reportID = strings.TrimSuffix(reportID, "/comparison-data")
-	if reportID == "" {
-		http.Error(w, "Report ID is required", http.StatusBadRequest)
+	if !validReportID(reportID) {
+		http.Error(w, "A valid report ID is required", http.StatusBadRequest)
 		return
 	}
 
@@ -217,8 +225,8 @@ func (h *Handler) GetPlayerData(w http.ResponseWriter, r *http.Request) {
 
 	reportID := strings.TrimPrefix(r.URL.Path, "/reports/")
 	reportID = strings.TrimSuffix(reportID, "/player-data")
-	if reportID == "" {
-		http.Error(w, "Report ID is required", http.StatusBadRequest)
+	if !validReportID(reportID) {
+		http.Error(w, "A valid report ID is required", http.StatusBadRequest)
 		return
 	}
 
@@ -282,7 +290,7 @@ func (h *Handler) GetCohortMemberData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Candidate.ReportID == "" || req.Candidate.FightID == 0 {
+	if !validReportID(req.Candidate.ReportID) || req.Candidate.FightID == 0 {
 		http.Error(w, "candidate reportId and fightId are required", http.StatusBadRequest)
 		return
 	}

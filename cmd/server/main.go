@@ -30,8 +30,11 @@ func main() {
 
 	// First service to exit takes the whole process down — they're all
 	// required, so a single failure should fail fast and surface in logs.
-	err := <-errs
-	log.Fatalf("service exited: %v", err)
+	// A nil error means a graceful signal-driven shutdown.
+	if err := <-errs; err != nil {
+		log.Fatalf("service exited: %v", err)
+	}
+	log.Println("wow-log-analyzer: shut down cleanly")
 }
 
 func loadDotEnv() {

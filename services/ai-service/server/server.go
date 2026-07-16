@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 
+	"wow-log-analyzer/internal/httpserver"
 	"wow-log-analyzer/services/ai-service/internal/config"
 	"wow-log-analyzer/services/ai-service/internal/handlers"
 	"wow-log-analyzer/services/ai-service/internal/service"
@@ -25,5 +26,5 @@ func Run() error {
 		cfg.LiveModelEnabled,
 	)
 	log.Printf("ai-service starting on %s", serverAddr)
-	return http.ListenAndServe(serverAddr, mux)
+	return httpserver.ListenAndServe("ai-service", serverAddr, mux)
 }

@@ -397,7 +397,32 @@ type ReportJob struct {
 	CreatedAt time.Time               `json:"createdAt"`
 	UpdatedAt time.Time               `json:"updatedAt"`
 
+	// Owner fields scope job reads to the creating user. They round-trip
+	// through Redis persistence; handlers must zero them before writing a job
+	// to the HTTP response.
+	OwnerUserID    int    `json:"ownerUserId,omitempty"`
+	OwnerSessionID string `json:"ownerSessionId,omitempty"`
+
 	timeline *reportTimelineData `json:"-"`
+}
+
+// JobOwner identifies who created a report job. UserID is the WCL user ID
+// when known; SessionID is the fallback identity for sessions whose user
+// lookup failed.
+type JobOwner struct {
+	SessionID string
+	UserID    int
+}
+
+// CanAccess reports whether the given session may read this job.
+func (j ReportJob) CanAccess(session *SessionState) bool {
+	if session == nil {
+		return false
+	}
+	if j.OwnerUserID != 0 && session.User != nil && session.User.ID == j.OwnerUserID {
+		return true
+	}
+	return j.OwnerSessionID != "" && j.OwnerSessionID == session.ID
 }
 
 type reportTimelineData struct {

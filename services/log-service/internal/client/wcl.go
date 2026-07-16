@@ -63,10 +63,10 @@ func NewWCLClient(cfg config.WCLConfig) WCLClient {
 
 // GetReportMetadata fetches report metadata and normalizes it
 func (c *WCLHTTPClient) GetReportMetadata(reportID string) (*types.NormalizedReport, error) {
-	query := fmt.Sprintf(`
-		query {
+	query := `
+		query ($code: String!) {
 			reportData {
-				report(code: "%s") {
+				report(code: $code) {
 					code
 					title
 					startTime
@@ -77,7 +77,7 @@ func (c *WCLHTTPClient) GetReportMetadata(reportID string) (*types.NormalizedRep
 					}
 				}
 			}
-		}`, reportID)
+		}`
 
 	var response struct {
 		Data struct {
@@ -87,7 +87,7 @@ func (c *WCLHTTPClient) GetReportMetadata(reportID string) (*types.NormalizedRep
 		} `json:"data"`
 	}
 
-	if err := c.makeGraphQLRequest(query, &response); err != nil {
+	if err := c.makeGraphQLRequest(query, map[string]interface{}{"code": reportID}, &response); err != nil {
 		return nil, fmt.Errorf("failed to fetch report metadata: %w", err)
 	}
 
@@ -96,10 +96,10 @@ func (c *WCLHTTPClient) GetReportMetadata(reportID string) (*types.NormalizedRep
 
 // GetFights fetches fights for a report and normalizes them
 func (c *WCLHTTPClient) GetFights(reportID string) ([]types.NormalizedFight, error) {
-	query := fmt.Sprintf(`
-		query {
+	query := `
+		query ($code: String!) {
 			reportData {
-				report(code: "%s") {
+				report(code: $code) {
 					startTime
 					masterData {
 						actors(type: "Player") {
@@ -125,7 +125,7 @@ func (c *WCLHTTPClient) GetFights(reportID string) ([]types.NormalizedFight, err
 					}
 				}
 			}
-		}`, reportID)
+		}`
 
 	var response struct {
 		Data struct {
@@ -141,7 +141,7 @@ func (c *WCLHTTPClient) GetFights(reportID string) ([]types.NormalizedFight, err
 		} `json:"data"`
 	}
 
-	if err := c.makeGraphQLRequest(query, &response); err != nil {
+	if err := c.makeGraphQLRequest(query, map[string]interface{}{"code": reportID}, &response); err != nil {
 		return nil, fmt.Errorf("failed to fetch fights: %w", err)
 	}
 
@@ -303,18 +303,23 @@ func (c *WCLHTTPClient) GetCohortMemberData(candidate types.RankingCandidate) (*
 	return &data, nil
 }
 
-// makeGraphQLRequest performs a GraphQL request to the WCL API
-func (c *WCLHTTPClient) makeGraphQLRequest(query string, response interface{}) error {
-	return c.makeAuthorizedGraphQLRequest(c.config.BaseURL+"/client", "", query, response)
+// makeGraphQLRequest performs a GraphQL request to the WCL API. External
+// string values (report codes, class/spec names) must be passed via
+// variables, never interpolated into the query text.
+func (c *WCLHTTPClient) makeGraphQLRequest(query string, variables map[string]interface{}, response interface{}) error {
+	return c.makeAuthorizedGraphQLRequest(c.config.BaseURL+"/client", "", query, variables, response)
 }
 
-func (c *WCLHTTPClient) makeUserGraphQLRequest(accessToken, query string, response interface{}) error {
-	return c.makeAuthorizedGraphQLRequest(c.config.BaseURL+"/user", accessToken, query, response)
+func (c *WCLHTTPClient) makeUserGraphQLRequest(accessToken, query string, variables map[string]interface{}, response interface{}) error {
+	return c.makeAuthorizedGraphQLRequest(c.config.BaseURL+"/user", accessToken, query, variables, response)
 }
 
-func (c *WCLHTTPClient) makeAuthorizedGraphQLRequest(endpoint, accessToken, query string, response interface{}) error {
-	requestBody := map[string]string{
+func (c *WCLHTTPClient) makeAuthorizedGraphQLRequest(endpoint, accessToken, query string, variables map[string]interface{}, response interface{}) error {
+	requestBody := map[string]interface{}{
 		"query": query,
+	}
+	if len(variables) > 0 {
+		requestBody["variables"] = variables
 	}
 
 	jsonData, err := json.Marshal(requestBody)
@@ -396,7 +401,7 @@ func (c *WCLHTTPClient) GetCurrentUser(accessToken string) (*types.UserProfile, 
 		} `json:"data"`
 	}
 
-	if err := c.makeUserGraphQLRequest(accessToken, query, &response); err != nil {
+	if err := c.makeUserGraphQLRequest(accessToken, query, nil, &response); err != nil {
 		return nil, fmt.Errorf("failed to fetch current user: %w", err)
 	}
 
@@ -450,7 +455,7 @@ func (c *WCLHTTPClient) GetOwnedCharacters(accessToken string) ([]types.OwnedCha
 		} `json:"data"`
 	}
 
-	if err := c.makeUserGraphQLRequest(accessToken, query, &response); err != nil {
+	if err := c.makeUserGraphQLRequest(accessToken, query, nil, &response); err != nil {
 		return nil, fmt.Errorf("failed to fetch owned characters: %w", err)
 	}
 
@@ -841,27 +846,37 @@ func (c *WCLHTTPClient) collectEncounterRankings(encounterID int, difficultyName
 }
 
 func (c *WCLHTTPClient) fetchEncounterRankingsPage(encounterID int, difficultyName, classFilter, specFilter string, page int) (*WCLCharacterRankingsResponse, error) {
+	variables := map[string]interface{}{}
+	varDecls := make([]string, 0, 2)
 	difficultyArg := ""
 	if difficultyID := rankingDifficultyID(difficultyName); difficultyID != 0 {
 		difficultyArg = fmt.Sprintf(", difficulty: %d", difficultyID)
 	}
 	classArg := ""
 	if classFilter != "" {
-		classArg = fmt.Sprintf(`, className: "%s"`, classFilter)
+		varDecls = append(varDecls, "$className: String!")
+		classArg = ", className: $className"
+		variables["className"] = classFilter
 	}
 	specArg := ""
 	if specFilter != "" {
-		specArg = fmt.Sprintf(`, specName: "%s"`, specFilter)
+		varDecls = append(varDecls, "$specName: String!")
+		specArg = ", specName: $specName"
+		variables["specName"] = specFilter
+	}
+	queryHeader := "query"
+	if len(varDecls) > 0 {
+		queryHeader = "query (" + strings.Join(varDecls, ", ") + ")"
 	}
 
 	query := fmt.Sprintf(`
-		query {
+		%s {
 			worldData {
 				encounter(id: %d) {
 					characterRankings(page: %d%s%s%s, includeCombatantInfo: true, metric: default)
 				}
 			}
-		}`, encounterID, page, difficultyArg, classArg, specArg)
+		}`, queryHeader, encounterID, page, difficultyArg, classArg, specArg)
 
 	var response struct {
 		Data struct {
@@ -875,7 +890,7 @@ func (c *WCLHTTPClient) fetchEncounterRankingsPage(encounterID int, difficultyNa
 
 	var err error
 	for attempt := 1; attempt <= 3; attempt++ {
-		err = c.makeGraphQLRequest(query, &response)
+		err = c.makeGraphQLRequest(query, variables, &response)
 		if err == nil {
 			break
 		}
@@ -930,10 +945,10 @@ func (c *WCLHTTPClient) fetchRankedPlayerFightData(ranking WCLRankingEntry) (typ
 }
 
 func (c *WCLHTTPClient) getPlayerActors(reportID string) ([]WCLActor, error) {
-	query := fmt.Sprintf(`
-		query {
+	query := `
+		query ($code: String!) {
 			reportData {
-				report(code: "%s") {
+				report(code: $code) {
 					masterData {
 						actors(type: "Player") {
 							id
@@ -947,7 +962,7 @@ func (c *WCLHTTPClient) getPlayerActors(reportID string) ([]WCLActor, error) {
 					}
 				}
 			}
-		}`, reportID)
+		}`
 
 	var response struct {
 		Data struct {
@@ -961,7 +976,7 @@ func (c *WCLHTTPClient) getPlayerActors(reportID string) ([]WCLActor, error) {
 		} `json:"data"`
 	}
 
-	if err := c.makeGraphQLRequest(query, &response); err != nil {
+	if err := c.makeGraphQLRequest(query, map[string]interface{}{"code": reportID}, &response); err != nil {
 		return nil, fmt.Errorf("failed to fetch report actors: %w", err)
 	}
 
@@ -977,10 +992,10 @@ func (c *WCLHTTPClient) getPlayerActors(reportID string) ([]WCLActor, error) {
 }
 
 func (c *WCLHTTPClient) getReportAbilityNames(reportID string) (map[int]string, error) {
-	query := fmt.Sprintf(`
-		query {
+	query := `
+		query ($code: String!) {
 			reportData {
-				report(code: "%s") {
+				report(code: $code) {
 					masterData {
 						abilities {
 							gameID
@@ -989,7 +1004,7 @@ func (c *WCLHTTPClient) getReportAbilityNames(reportID string) (map[int]string, 
 					}
 				}
 			}
-		}`, reportID)
+		}`
 
 	var response struct {
 		Data struct {
@@ -1003,7 +1018,7 @@ func (c *WCLHTTPClient) getReportAbilityNames(reportID string) (map[int]string, 
 		} `json:"data"`
 	}
 
-	if err := c.makeGraphQLRequest(query, &response); err != nil {
+	if err := c.makeGraphQLRequest(query, map[string]interface{}{"code": reportID}, &response); err != nil {
 		return nil, fmt.Errorf("failed to fetch report abilities: %w", err)
 	}
 
@@ -1033,16 +1048,16 @@ func (c *WCLHTTPClient) getFightCharacters(reportID string, fightID int) ([]type
 	}
 
 	query := fmt.Sprintf(`
-		query {
+		query ($code: String!) {
 			reportData {
-				report(code: "%s") {
+				report(code: $code) {
 					playerDetails(
 						fightIDs: [%d],
 						includeCombatantInfo: false
 					)
 				}
 			}
-		}`, reportID, fightID)
+		}`, fightID)
 
 	var response struct {
 		Data struct {
@@ -1054,7 +1069,7 @@ func (c *WCLHTTPClient) getFightCharacters(reportID string, fightID int) ([]type
 		} `json:"data"`
 	}
 
-	if err := c.makeGraphQLRequest(query, &response); err != nil {
+	if err := c.makeGraphQLRequest(query, map[string]interface{}{"code": reportID}, &response); err != nil {
 		return nil, fmt.Errorf("failed to fetch fight player details: %w", err)
 	}
 
@@ -1102,15 +1117,15 @@ func (c *WCLHTTPClient) addTalentBuilds(reportID string, fightID int, characters
 	}
 
 	query := fmt.Sprintf(`
-		query {
+		query ($code: String!) {
 			reportData {
-				report(code: "%s") {
+				report(code: $code) {
 					fights(fightIDs: [%d]) {
 						%s
 					}
 				}
 			}
-		}`, reportID, fightID, strings.Join(fields, "\n\t\t\t\t\t\t"))
+		}`, fightID, strings.Join(fields, "\n\t\t\t\t\t\t"))
 
 	var response struct {
 		Data struct {
@@ -1122,7 +1137,7 @@ func (c *WCLHTTPClient) addTalentBuilds(reportID string, fightID int, characters
 		} `json:"data"`
 	}
 
-	if err := c.makeGraphQLRequest(query, &response); err != nil {
+	if err := c.makeGraphQLRequest(query, map[string]interface{}{"code": reportID}, &response); err != nil {
 		return
 	}
 	if len(response.Data.ReportData.Report.Fights) == 0 {
@@ -1202,9 +1217,9 @@ func (c *WCLHTTPClient) fetchEvents(reportID, dataType string, fightID, sourceID
 		}
 
 		query := fmt.Sprintf(`
-			query {
+			query ($code: String!) {
 				reportData {
-					report(code: "%s") {
+					report(code: $code) {
 						events(
 							dataType: %s,
 							fightIDs: [%d],
@@ -1217,7 +1232,7 @@ func (c *WCLHTTPClient) fetchEvents(reportID, dataType string, fightID, sourceID
 						}
 					}
 				}
-			}`, reportID, dataType, fightID, sourceID, startClause)
+			}`, dataType, fightID, sourceID, startClause)
 
 		var response struct {
 			Data struct {
@@ -1232,7 +1247,7 @@ func (c *WCLHTTPClient) fetchEvents(reportID, dataType string, fightID, sourceID
 			} `json:"data"`
 		}
 
-		if err := c.makeGraphQLRequest(query, &response); err != nil {
+		if err := c.makeGraphQLRequest(query, map[string]interface{}{"code": reportID}, &response); err != nil {
 			return nil, fmt.Errorf("failed to fetch %s events: %w", dataType, err)
 		}
 
@@ -1261,9 +1276,9 @@ func (c *WCLHTTPClient) fetchBuffEvents(reportID string, fightID, actorID int) (
 		}
 
 		query := fmt.Sprintf(`
-			query {
+			query ($code: String!) {
 				reportData {
-					report(code: "%s") {
+					report(code: $code) {
 						events(
 							dataType: Buffs,
 							fightIDs: [%d],
@@ -1276,7 +1291,7 @@ func (c *WCLHTTPClient) fetchBuffEvents(reportID string, fightID, actorID int) (
 						}
 					}
 				}
-			}`, reportID, fightID, actorID, startClause)
+			}`, fightID, actorID, startClause)
 
 		var response struct {
 			Data struct {
@@ -1291,7 +1306,7 @@ func (c *WCLHTTPClient) fetchBuffEvents(reportID string, fightID, actorID int) (
 			} `json:"data"`
 		}
 
-		if err := c.makeGraphQLRequest(query, &response); err != nil {
+		if err := c.makeGraphQLRequest(query, map[string]interface{}{"code": reportID}, &response); err != nil {
 			return nil, fmt.Errorf("failed to fetch buff events: %w", err)
 		}
 
@@ -1374,7 +1389,7 @@ func (c *WCLHTTPClient) getCurrentUserCharacterReports(accessToken string, chara
 		} `json:"data"`
 	}
 
-	if err := c.makeUserGraphQLRequest(accessToken, query, &response); err != nil {
+	if err := c.makeUserGraphQLRequest(accessToken, query, nil, &response); err != nil {
 		return nil, fmt.Errorf("failed to fetch character recent reports: %w", err)
 	}
 

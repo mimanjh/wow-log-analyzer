@@ -36,51 +36,99 @@ func (h *ReportHandler) CreateJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	session, ok := h.requireSession(w, r)
+	if !ok {
+		return
+	}
+
 	// Enforce daily usage limit for authenticated users (skip if cached), and
 	// record this report against the user's account so it shows up on /reports.
-	if cookie, err := r.Cookie("wowlog_session"); err == nil {
-		if session, ok := h.authService.GetSession(cookie.Value); ok && session.User != nil {
-			if !h.reportService.HasCachedResult(req) {
-				limit := services.TierDailyLimit(session.AccountTier)
-				allowed, _, usageErr := h.reportService.CheckAndIncrementDailyUsage(r.Context(), session.User.ID, limit)
-				if usageErr != nil {
-					log.Printf("Usage check failed for user %d: %v", session.User.ID, usageErr)
-				} else if !allowed {
-					http.Error(w, fmt.Sprintf("Daily analysis limit of %d reached. Try again tomorrow.", limit), http.StatusTooManyRequests)
-					return
-				}
+	if session.User != nil {
+		if !h.reportService.HasCachedResult(req) {
+			limit := services.TierDailyLimit(session.AccountTier)
+			allowed, _, usageErr := h.reportService.CheckAndIncrementDailyUsage(r.Context(), session.User.ID, limit)
+			if usageErr != nil {
+				log.Printf("Usage check failed for user %d: %v", session.User.ID, usageErr)
+			} else if !allowed {
+				http.Error(w, fmt.Sprintf("Daily analysis limit of %d reached. Try again tomorrow.", limit), http.StatusTooManyRequests)
+				return
 			}
-			if h.accountService != nil {
-				if account, accErr := h.accountService.GetByWCLUserID(r.Context(), session.User.ID); accErr == nil {
-					recordErr := h.accountService.RecordReport(r.Context(), account.ID, services.UserReport{
-						ReportID:       req.ReportID,
-						FightID:        req.Fight.ID,
-						CharacterID:    req.Character.ID,
-						EncounterName:  req.Fight.Name,
-						Difficulty:     req.Fight.Difficulty,
-						CharacterName:  req.Character.Name,
-						CharacterClass: req.Character.Class,
-						CharacterSpec:  req.Character.Spec,
-					})
-					if recordErr != nil {
-						log.Printf("Failed to record user report for account %d: %v", account.ID, recordErr)
-					}
+		}
+		if h.accountService != nil {
+			if account, accErr := h.accountService.GetByWCLUserID(r.Context(), session.User.ID); accErr == nil {
+				recordErr := h.accountService.RecordReport(r.Context(), account.ID, services.UserReport{
+					ReportID:       req.ReportID,
+					FightID:        req.Fight.ID,
+					CharacterID:    req.Character.ID,
+					EncounterName:  req.Fight.Name,
+					Difficulty:     req.Fight.Difficulty,
+					CharacterName:  req.Character.Name,
+					CharacterClass: req.Character.Class,
+					CharacterSpec:  req.Character.Spec,
+				})
+				if recordErr != nil {
+					log.Printf("Failed to record user report for account %d: %v", account.ID, recordErr)
 				}
 			}
 		}
 	}
 
-	response, err := h.reportService.CreateJob(req)
+	owner := services.JobOwner{SessionID: session.ID}
+	if session.User != nil {
+		owner.UserID = session.User.ID
+	}
+
+	response, err := h.reportService.CreateJob(req, owner)
 	if err != nil {
 		log.Printf("Failed to create report job: %v", err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
+	writeJob(w, response)
+}
+
+// requireSession resolves the session cookie, writing a 401 when it is
+// missing or expired.
+func (h *ReportHandler) requireSession(w http.ResponseWriter, r *http.Request) (*services.SessionState, bool) {
+	cookie, err := r.Cookie("wowlog_session")
+	if err != nil {
+		http.Error(w, "Authentication required", http.StatusUnauthorized)
+		return nil, false
+	}
+	session, ok := h.authService.GetSession(cookie.Value)
+	if !ok {
+		http.Error(w, "Authentication required", http.StatusUnauthorized)
+		return nil, false
+	}
+	return session, true
+}
+
+// loadOwnedJob fetches a job and verifies the session owns it. A job that
+// exists but belongs to someone else is reported as 404 so job IDs cannot be
+// probed.
+func (h *ReportHandler) loadOwnedJob(w http.ResponseWriter, r *http.Request, jobID string) (services.ReportJob, *services.SessionState, bool) {
+	session, ok := h.requireSession(w, r)
+	if !ok {
+		return services.ReportJob{}, nil, false
+	}
+
+	job, err := h.reportService.GetJob(jobID)
+	if err != nil || !job.CanAccess(session) {
+		http.Error(w, fmt.Sprintf("report job %s not found", jobID), http.StatusNotFound)
+		return services.ReportJob{}, nil, false
+	}
+	return job, session, true
+}
+
+// writeJob encodes a job response with owner fields stripped.
+func writeJob(w http.ResponseWriter, job services.ReportJob) {
+	job.OwnerUserID = 0
+	job.OwnerSessionID = ""
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		log.Printf("Failed to encode report response: %v", err)
+	if err := json.NewEncoder(w).Encode(job); err != nil {
+		log.Printf("Failed to encode report job response: %v", err)
 	}
 }
 
@@ -170,17 +218,12 @@ func (h *ReportHandler) GetJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	job, err := h.reportService.GetJob(jobID)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+	job, _, ok := h.loadOwnedJob(w, r, jobID)
+	if !ok {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(job); err != nil {
-		log.Printf("Failed to encode report job response: %v", err)
-	}
+	writeJob(w, job)
 }
 
 func (h *ReportHandler) GetAbilityTimeline(w http.ResponseWriter, r *http.Request) {
@@ -200,6 +243,10 @@ func (h *ReportHandler) GetAbilityTimeline(w http.ResponseWriter, r *http.Reques
 	abilityID, err := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("abilityId")))
 	if err != nil || abilityID == 0 {
 		http.Error(w, "abilityId is required", http.StatusBadRequest)
+		return
+	}
+
+	if _, _, ok := h.loadOwnedJob(w, r, jobID); !ok {
 		return
 	}
 
@@ -236,6 +283,10 @@ func (h *ReportHandler) GetBuffTimeline(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	if _, _, ok := h.loadOwnedJob(w, r, jobID); !ok {
+		return
+	}
+
 	response, err := h.reportService.GetBuffTimeline(jobID, abilityID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
@@ -266,6 +317,10 @@ func (h *ReportHandler) GetResourceTimeline(w http.ResponseWriter, r *http.Reque
 	resourceTypeID, err := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("resourceTypeId")))
 	if err != nil {
 		http.Error(w, "resourceTypeId is required", http.StatusBadRequest)
+		return
+	}
+
+	if _, _, ok := h.loadOwnedJob(w, r, jobID); !ok {
 		return
 	}
 

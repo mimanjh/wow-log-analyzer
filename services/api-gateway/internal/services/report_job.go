@@ -65,7 +65,7 @@ func NewReportService(logURL, analysisURL, aiURL string, redisClient *redis.Clie
 
 func (s *ReportService) key(suffix string) string { return s.keyPrefix + suffix }
 
-func (s *ReportService) CreateJob(req GenerateReportRequest) (ReportJob, error) {
+func (s *ReportService) CreateJob(req GenerateReportRequest, owner JobOwner) (ReportJob, error) {
 	if req.ReportID == "" {
 		return ReportJob{}, fmt.Errorf("reportId is required")
 	}
@@ -73,25 +73,32 @@ func (s *ReportService) CreateJob(req GenerateReportRequest) (ReportJob, error) 
 		return ReportJob{}, fmt.Errorf("fight and character selections are required")
 	}
 
+	jobID, err := newJobID()
+	if err != nil {
+		return ReportJob{}, err
+	}
+
 	if cached, ok := s.getCachedResult(req); ok {
 		job := ReportJob{
-			ID:        newJobID(),
-			Status:    ReportJobCompleted,
-			Stage:     "completed",
-			Message:   "Report loaded from cache.",
-			Fight:     req.Fight,
-			Character: req.Character,
-			Progress:  ReportJobProgress{Current: 5, Total: 5},
-			Result:    &cached,
-			CreatedAt: time.Now().UTC(),
-			UpdatedAt: time.Now().UTC(),
+			ID:             jobID,
+			Status:         ReportJobCompleted,
+			Stage:          "completed",
+			Message:        "Report loaded from cache.",
+			Fight:          req.Fight,
+			Character:      req.Character,
+			Progress:       ReportJobProgress{Current: 5, Total: 5},
+			Result:         &cached,
+			CreatedAt:      time.Now().UTC(),
+			UpdatedAt:      time.Now().UTC(),
+			OwnerUserID:    owner.UserID,
+			OwnerSessionID: owner.SessionID,
 		}
 		s.setJob(job)
 		return job, nil
 	}
 
 	job := ReportJob{
-		ID:        newJobID(),
+		ID:        jobID,
 		Status:    ReportJobQueued,
 		Stage:     "queued",
 		Message:   "Queued for report generation.",
@@ -101,8 +108,10 @@ func (s *ReportService) CreateJob(req GenerateReportRequest) (ReportJob, error) 
 			Current: 0,
 			Total:   5,
 		},
-		CreatedAt: time.Now().UTC(),
-		UpdatedAt: time.Now().UTC(),
+		CreatedAt:      time.Now().UTC(),
+		UpdatedAt:      time.Now().UTC(),
+		OwnerUserID:    owner.UserID,
+		OwnerSessionID: owner.SessionID,
 	}
 
 	s.setJob(job)
@@ -275,10 +284,10 @@ func (s *ReportService) updateJob(jobID string, status ReportJobStatus, stage, m
 	}
 }
 
-func newJobID() string {
-	randomBytes := make([]byte, 8)
+func newJobID() (string, error) {
+	randomBytes := make([]byte, 16)
 	if _, err := rand.Read(randomBytes); err != nil {
-		return fmt.Sprintf("job-%d", time.Now().UnixNano())
+		return "", fmt.Errorf("generate job id: %w", err)
 	}
-	return hex.EncodeToString(randomBytes)
+	return hex.EncodeToString(randomBytes), nil
 }

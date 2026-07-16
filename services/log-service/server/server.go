@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 
+	"wow-log-analyzer/internal/httpserver"
 	"wow-log-analyzer/services/log-service/internal/config"
 	"wow-log-analyzer/services/log-service/internal/handlers"
 	"wow-log-analyzer/services/log-service/internal/service"
@@ -19,5 +20,5 @@ func Run() error {
 
 	serverAddr := fmt.Sprintf(":%s", cfg.Port)
 	log.Printf("log-service starting on %s", serverAddr)
-	return http.ListenAndServe(serverAddr, mux)
+	return httpserver.ListenAndServe("log-service", serverAddr, mux)
 }

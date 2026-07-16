@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 	"github.com/stripe/stripe-go/v81"
+	"wow-log-analyzer/internal/httpserver"
 	"wow-log-analyzer/services/api-gateway/internal/config"
 	"wow-log-analyzer/services/api-gateway/internal/handlers"
 	"wow-log-analyzer/services/api-gateway/internal/services"
@@ -33,8 +34,10 @@ func Run() error {
 	}
 
 	var accountService *services.AccountService
+	var db *pgxpool.Pool
 	if cfg.DatabaseURL != "" {
-		db, err := pgxpool.New(ctx, cfg.DatabaseURL)
+		var err error
+		db, err = pgxpool.New(ctx, cfg.DatabaseURL)
 		if err != nil {
 			log.Fatalf("Failed to connect to PostgreSQL: %v", err)
 		}
@@ -60,11 +63,16 @@ func Run() error {
 		cfg.FrontendURL+"/billing/success",
 		cfg.FrontendURL+"/analyze",
 	)
-	handlers.RegisterRoutes(mux, cfg, analyzeService, reportService, authService, browserService, accountService, billingService)
+	healthHandler := handlers.NewHealthHandler(redisClient, db, map[string]string{
+		"log-service":      cfg.LogServiceURL,
+		"analysis-service": cfg.AnalysisServiceURL,
+		"ai-service":       cfg.AIServiceURL,
+	})
+	handlers.RegisterRoutes(mux, cfg, analyzeService, reportService, authService, browserService, accountService, billingService, healthHandler)
 
 	serverAddr := fmt.Sprintf(":%s", cfg.Port)
 	log.Printf("api-gateway starting on %s", serverAddr)
-	return http.ListenAndServe(serverAddr, mux)
+	return httpserver.ListenAndServe("api-gateway", serverAddr, mux)
 }
 
 // buildRedisClient parses REDIS_URL (redis:// or rediss://) so the same

@@ -20,6 +20,10 @@ import (
 
 const sessionRedisKeyPrefix = "session:"
 
+const oauthStateRedisKeyPrefix = "oauthstate:"
+
+const oauthStateTTL = 10 * time.Minute
+
 const sessionCookieName = "wowlog_session"
 
 type AuthStatusResponse struct {
@@ -69,11 +73,28 @@ func NewAuthService(cfg config.Config, redisClient *redis.Client) *AuthService {
 func (s *AuthService) key(suffix string) string { return s.cfg.RedisKeyPrefix + suffix }
 
 func (s *AuthService) BuildLoginURL() (string, error) {
-	state := randomToken(16)
+	state, err := randomToken(16)
+	if err != nil {
+		return "", fmt.Errorf("generate oauth state: %w", err)
+	}
 
 	s.mu.Lock()
-	s.pendingStates[state] = pendingOAuthState{ExpiresAt: time.Now().UTC().Add(10 * time.Minute)}
+	now := time.Now().UTC()
+	for k, pending := range s.pendingStates {
+		if pending.ExpiresAt.Before(now) {
+			delete(s.pendingStates, k)
+		}
+	}
+	s.pendingStates[state] = pendingOAuthState{ExpiresAt: now.Add(oauthStateTTL)}
 	s.mu.Unlock()
+
+	// Persist synchronously so the callback can land on another instance (or a
+	// restarted one) and still validate the state.
+	if s.redisClient != nil {
+		if err := s.redisClient.Set(context.Background(), s.key(oauthStateRedisKeyPrefix+state), "1", oauthStateTTL).Err(); err != nil {
+			log.Printf("Failed to persist oauth state to Redis: %v", err)
+		}
+	}
 
 	query := url.Values{}
 	query.Set("client_id", s.cfg.WCLClientID)
@@ -128,8 +149,13 @@ func (s *AuthService) HandleCallback(code, state string) (*SessionState, error) 
 		return nil, fmt.Errorf("oauth token exchange returned an empty access token")
 	}
 
+	sessionID, err := randomToken(24)
+	if err != nil {
+		return nil, fmt.Errorf("generate session id: %w", err)
+	}
+
 	session := SessionState{
-		ID:          randomToken(24),
+		ID:          sessionID,
 		AccessToken: payload.AccessToken,
 		ExpiresAt:   time.Now().UTC().Add(time.Duration(payload.ExpiresIn) * time.Second),
 	}
@@ -160,11 +186,14 @@ func (s *AuthService) GetSession(sessionID string) (*SessionState, bool) {
 	}
 
 	if session.ExpiresAt.Before(time.Now().UTC()) {
+		s.mu.Lock()
+		delete(s.sessions, sessionID)
+		s.mu.Unlock()
 		return nil, false
 	}
 
-	copy := session
-	return &copy, true
+	sessionCopy := session
+	return &sessionCopy, true
 }
 
 func (s *AuthService) UpdateSessionUser(sessionID string, user *AuthUser) {
@@ -237,20 +266,33 @@ func (s *AuthService) loadSessionFromRedis(sessionID string) (SessionState, erro
 
 func (s *AuthService) consumePendingState(state string) bool {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	pending, ok := s.pendingStates[state]
-	if !ok {
-		return false
+	if ok {
+		delete(s.pendingStates, state)
 	}
-	delete(s.pendingStates, state)
-	return pending.ExpiresAt.After(time.Now().UTC())
+	s.mu.Unlock()
+
+	// Delete the Redis copy regardless of where the state was found so it can
+	// never be replayed through another instance.
+	var inRedis bool
+	if s.redisClient != nil {
+		deleted, err := s.redisClient.Del(context.Background(), s.key(oauthStateRedisKeyPrefix+state)).Result()
+		if err != nil {
+			log.Printf("Failed to delete oauth state from Redis: %v", err)
+		}
+		inRedis = deleted > 0
+	}
+
+	if ok {
+		return pending.ExpiresAt.After(time.Now().UTC())
+	}
+	return inRedis
 }
 
-func randomToken(size int) string {
+func randomToken(size int) (string, error) {
 	buf := make([]byte, size)
 	if _, err := rand.Read(buf); err != nil {
-		return fmt.Sprintf("%d", time.Now().UnixNano())
+		return "", err
 	}
-	return hex.EncodeToString(buf)
+	return hex.EncodeToString(buf), nil
 }

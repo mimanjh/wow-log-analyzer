@@ -31,6 +31,10 @@ import type {
     ResourceTimelineSeries,
 } from "../types";
 
+const REPORT_POLL_INTERVAL_MS = 5000;
+const REPORT_POLL_TIMEOUT_MS = 10 * 60 * 1000;
+const REPORT_POLL_MAX_FAILURES = 3;
+
 const reportStages = [
     { key: "player-data", label: "Fetch Player Data" },
     { key: "rankings", label: "Find Ranking Elites" },
@@ -1542,14 +1546,40 @@ export function ReportPage() {
         }
 
         let cancelled = false;
+        let intervalId = 0;
+        let consecutiveFailures = 0;
+        const startedAt = Date.now();
+
+        // Stop polling and surface the failure through the job itself so the
+        // progress view renders it — otherwise a stuck job polls forever.
+        const giveUp = (message: string) => {
+            window.clearInterval(intervalId);
+            setError(message);
+            const currentJob = useAnalyzeStore.getState().reportJob;
+            if (currentJob) {
+                setReportJob({
+                    ...currentJob,
+                    status: "failed",
+                    error: message,
+                });
+            }
+        };
 
         const refreshJob = async () => {
+            if (Date.now() - startedAt > REPORT_POLL_TIMEOUT_MS) {
+                giveUp(
+                    "Report generation timed out. Please try analyzing the fight again.",
+                );
+                return;
+            }
+
             try {
                 const nextJob = await getReportJob(reportJobId);
                 if (cancelled) {
                     return;
                 }
 
+                consecutiveFailures = 0;
                 setReportJob(nextJob);
                 if (nextJob.result) {
                     setReportResult(nextJob.result);
@@ -1562,18 +1592,21 @@ export function ReportPage() {
                     return;
                 }
 
-                setError(
-                    err instanceof Error
-                        ? err.message
-                        : "Failed to refresh report status",
-                );
+                consecutiveFailures += 1;
+                if (consecutiveFailures >= REPORT_POLL_MAX_FAILURES) {
+                    giveUp(
+                        err instanceof Error
+                            ? err.message
+                            : "Failed to refresh report status",
+                    );
+                }
             }
         };
 
         void refreshJob();
-        const intervalId = window.setInterval(() => {
+        intervalId = window.setInterval(() => {
             void refreshJob();
-        }, 5000);
+        }, REPORT_POLL_INTERVAL_MS);
 
         return () => {
             cancelled = true;
@@ -1625,18 +1658,34 @@ export function ReportPage() {
     }
 
     if (!reportResult && reportJob) {
+        // A completed job without a result payload means the backend lost the
+        // result — treat it as a failure instead of showing progress forever.
+        const displayJob =
+            reportJob.status === "completed" && !reportJob.result
+                ? {
+                      ...reportJob,
+                      status: "failed" as const,
+                      error:
+                          reportJob.error ||
+                          "The report finished without a result. Please try analyzing the fight again.",
+                  }
+                : reportJob;
         return (
             <section className="space-y-8">
                 {renderProgressView(
-                    reportJob,
-                    reportJob.fight,
-                    reportJob.character,
+                    displayJob,
+                    displayJob.fight,
+                    displayJob.character,
                 )}
             </section>
         );
     }
 
-    const { fight, character, comparison, warnings = [], ai } = reportResult!;
+    if (!reportResult) {
+        return null;
+    }
+
+    const { fight, character, comparison, warnings = [], ai } = reportResult;
     const visibleWarnings = warnings.filter(
         (warning) => !dismissedWarnings[`${warning.kind}-${warning.title}`],
     );

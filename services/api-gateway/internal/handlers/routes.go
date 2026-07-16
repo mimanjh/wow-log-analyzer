@@ -8,7 +8,7 @@ import (
 	"wow-log-analyzer/services/api-gateway/internal/services"
 )
 
-func RegisterRoutes(mux *http.ServeMux, cfg config.Config, analyzeService *services.AnalyzeService, reportService *services.ReportService, authService *services.AuthService, browserService *services.BrowserService, accountService *services.AccountService, billingService *services.BillingService) {
+func RegisterRoutes(mux *http.ServeMux, cfg config.Config, analyzeService *services.AnalyzeService, reportService *services.ReportService, authService *services.AuthService, browserService *services.BrowserService, accountService *services.AccountService, billingService *services.BillingService, healthHandler *HealthHandler) {
 	analyzeHandler := NewAnalyzeHandler(analyzeService)
 	reportHandler := NewReportHandler(reportService, authService, accountService)
 	authHandler := NewAuthHandler(authService, browserService, accountService, cfg)
@@ -16,7 +16,7 @@ func RegisterRoutes(mux *http.ServeMux, cfg config.Config, analyzeService *servi
 	billingHandler := NewBillingHandler(authService, accountService, billingService, cfg.FrontendURL)
 
 	mux.Handle("/", NewStaticHandler())
-	mux.HandleFunc("/health", healthHandler)
+	mux.HandleFunc("/health", healthHandler.Handle)
 	mux.HandleFunc("/api/auth/login", authHandler.Login)
 	mux.HandleFunc("/api/auth/callback", authHandler.Callback)
 	mux.HandleFunc("/api/auth/status", authHandler.Status)
@@ -54,4 +54,3 @@ func RegisterRoutes(mux *http.ServeMux, cfg config.Config, analyzeService *servi
 		reportHandler.GetJob(w, r)
 	})
 }
-

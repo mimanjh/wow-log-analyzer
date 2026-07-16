@@ -5,6 +5,14 @@ primary_region = "iad"
 
 [build]
 
+# Required Fly secrets (set out-of-band, never in this file):
+#   fly secrets set WCL_CLIENT_ID=... WCL_CLIENT_SECRET=... ANTHROPIC_API_KEY=...
+#   fly secrets set REDIS_URL=...      # e.g. fly redis create → connection string
+#   fly secrets set DATABASE_URL=...   # e.g. fly postgres create + attach
+#   fly secrets set FRONTEND_URL=https://<app>.fly.dev WCL_REDIRECT_URL=https://<app>.fly.dev/api/auth/callback
+# Without REDIS_URL the app runs uncached and sessions die on machine restart;
+# without DATABASE_URL accounts/billing/saved reports are disabled.
+
 [env]
   PORT = "8080"
   ENV = "production"
@@ -30,7 +38,9 @@ primary_region = "iad"
   force_https = true
   auto_stop_machines = "stop"
   auto_start_machines = true
-  min_machines_running = 0
+  # Keep one machine warm: sessions/jobs have in-memory copies and OAuth
+  # callbacks must land on a live instance; scale-to-zero logged users out.
+  min_machines_running = 1
   processes = ["app"]
 
   [[http_service.checks]]
