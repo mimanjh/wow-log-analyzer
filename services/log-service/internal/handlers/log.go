@@ -41,7 +41,7 @@ func (h *Handler) GetReportMetadata(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	report, err := h.logService.GetReportMetadata(reportID)
+	report, err := h.logService.GetReportMetadata(r.Context(), reportID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -64,7 +64,7 @@ func (h *Handler) GetFights(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fights, err := h.logService.GetFights(reportID)
+	fights, err := h.logService.GetFights(r.Context(), reportID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -99,7 +99,7 @@ func (h *Handler) GetCharacters(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	characters, err := h.logService.GetCharacters(reportID, fightID)
+	characters, err := h.logService.GetCharacters(r.Context(), reportID, fightID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -133,7 +133,7 @@ func (h *Handler) GetComparisonData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	response, err := h.logService.GetComparisonData(reportID, req.Fight, req.CharacterID)
+	response, err := h.logService.GetComparisonData(r.Context(), reportID, req.Fight, req.CharacterID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -150,7 +150,7 @@ func (h *Handler) GetCurrentUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := h.logService.GetCurrentUser(accessToken)
+	user, err := h.logService.GetCurrentUser(r.Context(), accessToken)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
@@ -167,7 +167,7 @@ func (h *Handler) GetOwnedCharacters(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	characters, err := h.logService.GetOwnedCharacters(accessToken)
+	characters, err := h.logService.GetOwnedCharacters(r.Context(), accessToken)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
@@ -199,7 +199,7 @@ func (h *Handler) GetCharacterReports(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	page, err := h.logService.GetCharacterReports(accessToken, characterID, r.URL.Query().Get("cursor"), limit)
+	page, err := h.logService.GetCharacterReports(r.Context(), accessToken, characterID, r.URL.Query().Get("cursor"), limit)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
@@ -241,7 +241,7 @@ func (h *Handler) GetPlayerData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	response, err := h.logService.GetPlayerFightData(reportID, req.Fight, req.CharacterID)
+	response, err := h.logService.GetPlayerFightData(r.Context(), reportID, req.Fight, req.CharacterID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -268,7 +268,7 @@ func (h *Handler) GetRankingCandidates(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	candidates, err := h.logService.GetRankingCandidates(req.Fight, req.CharacterClass, req.CharacterSpec, req.Limit)
+	candidates, err := h.logService.GetRankingCandidates(r.Context(), req.Fight, req.CharacterClass, req.CharacterSpec, req.Limit)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -295,7 +295,7 @@ func (h *Handler) GetCohortMemberData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	response, err := h.logService.GetCohortMemberData(req.Candidate)
+	response, err := h.logService.GetCohortMemberData(r.Context(), req.Candidate)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

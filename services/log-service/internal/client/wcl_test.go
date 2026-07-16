@@ -2,6 +2,7 @@ package client
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"net/http"
 	"testing"
@@ -52,7 +53,7 @@ func TestWCLHTTPClient_GetReportMetadata(t *testing.T) {
 		},
 	}
 
-	report, err := client.GetReportMetadata("ABC123")
+	report, err := client.GetReportMetadata(context.Background(), "ABC123")
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
@@ -133,7 +134,7 @@ func TestWCLHTTPClient_GetFights(t *testing.T) {
 		},
 	}
 
-	fights, err := client.GetFights("ABC123")
+	fights, err := client.GetFights(context.Background(), "ABC123")
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
