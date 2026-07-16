@@ -403,7 +403,8 @@ func (s *ReportService) postForRaw(ctx context.Context, client *http.Client, end
 	}
 	defer resp.Body.Close()
 
-	bodyBytes, err := io.ReadAll(resp.Body)
+	// Event-heavy payloads run to a few MB; 64MB bounds a runaway response.
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
 	if err != nil {
 		return nil, err
 	}

@@ -2,9 +2,11 @@ package client
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"sort"
@@ -20,6 +22,16 @@ type httpDoer interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
+const (
+	// maxResponseBodyBytes bounds WCL response reads; event pages run ~1MB,
+	// so 32MB is far above any legitimate payload.
+	maxResponseBodyBytes = 32 << 20
+	maxErrorBodyBytes    = 64 << 10
+
+	// maxEventPages caps the events pagination loop (10k events per page).
+	maxEventPages = 40
+)
+
 type graphqlErrorResponse struct {
 	Errors []struct {
 		Message string `json:"message"`
@@ -28,16 +40,16 @@ type graphqlErrorResponse struct {
 
 // WCLClient defines the interface for Warcraft Logs API interactions
 type WCLClient interface {
-	GetReportMetadata(reportID string) (*types.NormalizedReport, error)
-	GetFights(reportID string) ([]types.NormalizedFight, error)
-	GetCharacters(reportID string, fightID int) ([]types.CharacterOption, error)
-	GetComparisonData(reportID string, fight types.FightSelection, characterID int) (*types.ComparisonDataResponse, error)
-	GetPlayerFightData(reportID string, fight types.FightSelection, characterID int) (*types.PlayerFightData, error)
-	GetRankingCandidates(fight types.FightSelection, characterClass, characterSpec string, limit int) ([]types.RankingCandidate, error)
-	GetCohortMemberData(candidate types.RankingCandidate) (*types.PlayerFightData, error)
-	GetCurrentUser(accessToken string) (*types.UserProfile, error)
-	GetOwnedCharacters(accessToken string) ([]types.OwnedCharacter, error)
-	GetCharacterReports(accessToken string, characterID int, cursor string, limit int) (*types.CharacterReportsPage, error)
+	GetReportMetadata(ctx context.Context, reportID string) (*types.NormalizedReport, error)
+	GetFights(ctx context.Context, reportID string) ([]types.NormalizedFight, error)
+	GetCharacters(ctx context.Context, reportID string, fightID int) ([]types.CharacterOption, error)
+	GetComparisonData(ctx context.Context, reportID string, fight types.FightSelection, characterID int) (*types.ComparisonDataResponse, error)
+	GetPlayerFightData(ctx context.Context, reportID string, fight types.FightSelection, characterID int) (*types.PlayerFightData, error)
+	GetRankingCandidates(ctx context.Context, fight types.FightSelection, characterClass, characterSpec string, limit int) ([]types.RankingCandidate, error)
+	GetCohortMemberData(ctx context.Context, candidate types.RankingCandidate) (*types.PlayerFightData, error)
+	GetCurrentUser(ctx context.Context, accessToken string) (*types.UserProfile, error)
+	GetOwnedCharacters(ctx context.Context, accessToken string) ([]types.OwnedCharacter, error)
+	GetCharacterReports(ctx context.Context, accessToken string, characterID int, cursor string, limit int) (*types.CharacterReportsPage, error)
 }
 
 // WCLHTTPClient implements WCLClient using HTTP requests
@@ -62,7 +74,7 @@ func NewWCLClient(cfg config.WCLConfig) WCLClient {
 }
 
 // GetReportMetadata fetches report metadata and normalizes it
-func (c *WCLHTTPClient) GetReportMetadata(reportID string) (*types.NormalizedReport, error) {
+func (c *WCLHTTPClient) GetReportMetadata(ctx context.Context, reportID string) (*types.NormalizedReport, error) {
 	query := `
 		query ($code: String!) {
 			reportData {
@@ -87,7 +99,7 @@ func (c *WCLHTTPClient) GetReportMetadata(reportID string) (*types.NormalizedRep
 		} `json:"data"`
 	}
 
-	if err := c.makeGraphQLRequest(query, map[string]interface{}{"code": reportID}, &response); err != nil {
+	if err := c.makeGraphQLRequest(ctx, query, map[string]interface{}{"code": reportID}, &response); err != nil {
 		return nil, fmt.Errorf("failed to fetch report metadata: %w", err)
 	}
 
@@ -95,7 +107,7 @@ func (c *WCLHTTPClient) GetReportMetadata(reportID string) (*types.NormalizedRep
 }
 
 // GetFights fetches fights for a report and normalizes them
-func (c *WCLHTTPClient) GetFights(reportID string) ([]types.NormalizedFight, error) {
+func (c *WCLHTTPClient) GetFights(ctx context.Context, reportID string) ([]types.NormalizedFight, error) {
 	query := `
 		query ($code: String!) {
 			reportData {
@@ -141,7 +153,7 @@ func (c *WCLHTTPClient) GetFights(reportID string) ([]types.NormalizedFight, err
 		} `json:"data"`
 	}
 
-	if err := c.makeGraphQLRequest(query, map[string]interface{}{"code": reportID}, &response); err != nil {
+	if err := c.makeGraphQLRequest(ctx, query, map[string]interface{}{"code": reportID}, &response); err != nil {
 		return nil, fmt.Errorf("failed to fetch fights: %w", err)
 	}
 
@@ -152,19 +164,19 @@ func (c *WCLHTTPClient) GetFights(reportID string) ([]types.NormalizedFight, err
 	), nil
 }
 
-func (c *WCLHTTPClient) GetCharacters(reportID string, fightID int) ([]types.CharacterOption, error) {
-	return c.getFightCharacters(reportID, fightID)
+func (c *WCLHTTPClient) GetCharacters(ctx context.Context, reportID string, fightID int) ([]types.CharacterOption, error) {
+	return c.getFightCharacters(ctx, reportID, fightID)
 }
 
-func (c *WCLHTTPClient) GetComparisonData(reportID string, fight types.FightSelection, characterID int) (*types.ComparisonDataResponse, error) {
+func (c *WCLHTTPClient) GetComparisonData(ctx context.Context, reportID string, fight types.FightSelection, characterID int) (*types.ComparisonDataResponse, error) {
 	selectedFight := normalizedFightFromSelection(fight)
 
-	playerData, err := c.GetPlayerFightData(reportID, fight, characterID)
+	playerData, err := c.GetPlayerFightData(ctx, reportID, fight, characterID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch player fight data: %w", err)
 	}
 
-	characters, err := c.getFightCharacters(reportID, fight.ID)
+	characters, err := c.getFightCharacters(ctx, reportID, fight.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -182,6 +194,7 @@ func (c *WCLHTTPClient) GetComparisonData(reportID string, fight types.FightSele
 	}
 
 	candidates, err := c.GetRankingCandidates(
+		ctx,
 		fight,
 		selectedCharacter.Class,
 		selectedCharacter.Spec,
@@ -193,7 +206,7 @@ func (c *WCLHTTPClient) GetComparisonData(reportID string, fight types.FightSele
 
 	cohortData := make([]types.PlayerFightData, 0, len(candidates))
 	for _, candidate := range candidates {
-		cohortEntry, err := c.GetCohortMemberData(candidate)
+		cohortEntry, err := c.GetCohortMemberData(ctx, candidate)
 		if err != nil {
 			continue
 		}
@@ -218,9 +231,9 @@ func (c *WCLHTTPClient) GetComparisonData(reportID string, fight types.FightSele
 	}, nil
 }
 
-func (c *WCLHTTPClient) GetPlayerFightData(reportID string, fight types.FightSelection, characterID int) (*types.PlayerFightData, error) {
+func (c *WCLHTTPClient) GetPlayerFightData(ctx context.Context, reportID string, fight types.FightSelection, characterID int) (*types.PlayerFightData, error) {
 	selectedFight := normalizedFightFromSelection(fight)
-	playerData, err := c.fetchPlayerFightData(reportID, selectedFight, characterID)
+	playerData, err := c.fetchPlayerFightData(ctx, reportID, selectedFight, characterID)
 	if err != nil {
 		return nil, err
 	}
@@ -228,13 +241,13 @@ func (c *WCLHTTPClient) GetPlayerFightData(reportID string, fight types.FightSel
 	return &playerData, nil
 }
 
-func (c *WCLHTTPClient) GetRankingCandidates(fight types.FightSelection, characterClass, characterSpec string, limit int) ([]types.RankingCandidate, error) {
+func (c *WCLHTTPClient) GetRankingCandidates(ctx context.Context, fight types.FightSelection, characterClass, characterSpec string, limit int) ([]types.RankingCandidate, error) {
 	selectedFight := normalizedFightFromSelection(fight)
 	if limit <= 0 {
 		limit = 10
 	}
 
-	rankings, err := c.getEncounterRankings(selectedFight.EncounterID, selectedFight.Difficulty, characterClass, characterSpec, limit)
+	rankings, err := c.getEncounterRankings(ctx, selectedFight.EncounterID, selectedFight.Difficulty, characterClass, characterSpec, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -278,7 +291,7 @@ func (c *WCLHTTPClient) GetRankingCandidates(fight types.FightSelection, charact
 	return candidates, nil
 }
 
-func (c *WCLHTTPClient) GetCohortMemberData(candidate types.RankingCandidate) (*types.PlayerFightData, error) {
+func (c *WCLHTTPClient) GetCohortMemberData(ctx context.Context, candidate types.RankingCandidate) (*types.PlayerFightData, error) {
 	ranking := WCLRankingEntry{
 		Name:     candidate.Name,
 		Class:    candidate.Class,
@@ -295,7 +308,7 @@ func (c *WCLHTTPClient) GetCohortMemberData(candidate types.RankingCandidate) (*
 		},
 	}
 
-	data, err := c.fetchRankedPlayerFightData(ranking)
+	data, err := c.fetchRankedPlayerFightData(ctx, ranking)
 	if err != nil {
 		return nil, err
 	}
@@ -306,15 +319,15 @@ func (c *WCLHTTPClient) GetCohortMemberData(candidate types.RankingCandidate) (*
 // makeGraphQLRequest performs a GraphQL request to the WCL API. External
 // string values (report codes, class/spec names) must be passed via
 // variables, never interpolated into the query text.
-func (c *WCLHTTPClient) makeGraphQLRequest(query string, variables map[string]interface{}, response interface{}) error {
-	return c.makeAuthorizedGraphQLRequest(c.config.BaseURL+"/client", "", query, variables, response)
+func (c *WCLHTTPClient) makeGraphQLRequest(ctx context.Context, query string, variables map[string]interface{}, response interface{}) error {
+	return c.makeAuthorizedGraphQLRequest(ctx, c.config.BaseURL+"/client", "", query, variables, response)
 }
 
-func (c *WCLHTTPClient) makeUserGraphQLRequest(accessToken, query string, variables map[string]interface{}, response interface{}) error {
-	return c.makeAuthorizedGraphQLRequest(c.config.BaseURL+"/user", accessToken, query, variables, response)
+func (c *WCLHTTPClient) makeUserGraphQLRequest(ctx context.Context, accessToken, query string, variables map[string]interface{}, response interface{}) error {
+	return c.makeAuthorizedGraphQLRequest(ctx, c.config.BaseURL+"/user", accessToken, query, variables, response)
 }
 
-func (c *WCLHTTPClient) makeAuthorizedGraphQLRequest(endpoint, accessToken, query string, variables map[string]interface{}, response interface{}) error {
+func (c *WCLHTTPClient) makeAuthorizedGraphQLRequest(ctx context.Context, endpoint, accessToken, query string, variables map[string]interface{}, response interface{}) error {
 	requestBody := map[string]interface{}{
 		"query": query,
 	}
@@ -327,7 +340,7 @@ func (c *WCLHTTPClient) makeAuthorizedGraphQLRequest(endpoint, accessToken, quer
 		return fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", endpoint, bytes.NewBuffer(jsonData))
+	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
@@ -336,7 +349,7 @@ func (c *WCLHTTPClient) makeAuthorizedGraphQLRequest(endpoint, accessToken, quer
 	if accessToken != "" {
 		req.Header.Set("Authorization", "Bearer "+accessToken)
 	} else if c.config.ClientID != "" && c.config.ClientSecret != "" {
-		token, err := c.getAccessToken()
+		token, err := c.getAccessToken(ctx)
 		if err != nil {
 			return err
 		}
@@ -350,11 +363,11 @@ func (c *WCLHTTPClient) makeAuthorizedGraphQLRequest(endpoint, accessToken, quer
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
 		return fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodyBytes))
 	if err != nil {
 		return fmt.Errorf("failed to read response body: %w", err)
 	}
@@ -380,7 +393,7 @@ func (c *WCLHTTPClient) makeAuthorizedGraphQLRequest(endpoint, accessToken, quer
 	return nil
 }
 
-func (c *WCLHTTPClient) GetCurrentUser(accessToken string) (*types.UserProfile, error) {
+func (c *WCLHTTPClient) GetCurrentUser(ctx context.Context, accessToken string) (*types.UserProfile, error) {
 	query := `
 		query {
 			userData {
@@ -401,7 +414,7 @@ func (c *WCLHTTPClient) GetCurrentUser(accessToken string) (*types.UserProfile, 
 		} `json:"data"`
 	}
 
-	if err := c.makeUserGraphQLRequest(accessToken, query, nil, &response); err != nil {
+	if err := c.makeUserGraphQLRequest(ctx, accessToken, query, nil, &response); err != nil {
 		return nil, fmt.Errorf("failed to fetch current user: %w", err)
 	}
 
@@ -414,7 +427,7 @@ func (c *WCLHTTPClient) GetCurrentUser(accessToken string) (*types.UserProfile, 
 	}, nil
 }
 
-func (c *WCLHTTPClient) GetOwnedCharacters(accessToken string) ([]types.OwnedCharacter, error) {
+func (c *WCLHTTPClient) GetOwnedCharacters(ctx context.Context, accessToken string) ([]types.OwnedCharacter, error) {
 	query := `
 		query {
 			userData {
@@ -455,7 +468,7 @@ func (c *WCLHTTPClient) GetOwnedCharacters(accessToken string) ([]types.OwnedCha
 		} `json:"data"`
 	}
 
-	if err := c.makeUserGraphQLRequest(accessToken, query, nil, &response); err != nil {
+	if err := c.makeUserGraphQLRequest(ctx, accessToken, query, nil, &response); err != nil {
 		return nil, fmt.Errorf("failed to fetch owned characters: %w", err)
 	}
 
@@ -487,7 +500,7 @@ func (c *WCLHTTPClient) GetOwnedCharacters(accessToken string) ([]types.OwnedCha
 	return characters, nil
 }
 
-func (c *WCLHTTPClient) GetCharacterReports(accessToken string, characterID int, cursor string, limit int) (*types.CharacterReportsPage, error) {
+func (c *WCLHTTPClient) GetCharacterReports(ctx context.Context, accessToken string, characterID int, cursor string, limit int) (*types.CharacterReportsPage, error) {
 	if characterID == 0 {
 		return nil, fmt.Errorf("character id is required")
 	}
@@ -510,7 +523,7 @@ func (c *WCLHTTPClient) GetCharacterReports(accessToken string, characterID int,
 	currentOffset := offset
 
 	for len(collected) < limit {
-		character, err := c.getCurrentUserCharacterReports(accessToken, characterID, currentPage, rawLimit)
+		character, err := c.getCurrentUserCharacterReports(ctx, accessToken, characterID, currentPage, rawLimit)
 		if err != nil {
 			return nil, err
 		}
@@ -611,7 +624,7 @@ func (c *WCLHTTPClient) GetCharacterReports(accessToken string, characterID int,
 	}, nil
 }
 
-func (c *WCLHTTPClient) getAccessToken() (string, error) {
+func (c *WCLHTTPClient) getAccessToken(ctx context.Context) (string, error) {
 	c.tokenMu.Lock()
 	defer c.tokenMu.Unlock()
 
@@ -622,7 +635,7 @@ func (c *WCLHTTPClient) getAccessToken() (string, error) {
 	form := url.Values{}
 	form.Set("grant_type", "client_credentials")
 
-	req, err := http.NewRequest("POST", "https://www.warcraftlogs.com/oauth/token", strings.NewReader(form.Encode()))
+	req, err := http.NewRequestWithContext(ctx, "POST", "https://www.warcraftlogs.com/oauth/token", strings.NewReader(form.Encode()))
 	if err != nil {
 		return "", fmt.Errorf("failed to create token request: %w", err)
 	}
@@ -636,7 +649,7 @@ func (c *WCLHTTPClient) getAccessToken() (string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
 		return "", fmt.Errorf("oauth token request failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -746,8 +759,8 @@ func (c *WCLHTTPClient) normalizeDifficulty(difficulty int) string {
 	}
 }
 
-func (c *WCLHTTPClient) fetchTopRankedCohortData(selectedFight types.NormalizedFight, selectedActor WCLActor) ([]types.PlayerFightData, error) {
-	rankings, err := c.getEncounterRankings(selectedFight.EncounterID, selectedFight.Difficulty, selectedActor.Type, selectedActor.SubType, 10)
+func (c *WCLHTTPClient) fetchTopRankedCohortData(ctx context.Context, selectedFight types.NormalizedFight, selectedActor WCLActor) ([]types.PlayerFightData, error) {
+	rankings, err := c.getEncounterRankings(ctx, selectedFight.EncounterID, selectedFight.Difficulty, selectedActor.Type, selectedActor.SubType, 10)
 	if err != nil {
 		return nil, err
 	}
@@ -766,7 +779,7 @@ func (c *WCLHTTPClient) fetchTopRankedCohortData(selectedFight types.NormalizedF
 		go func(index int, ranking WCLRankingEntry) {
 			defer wg.Done()
 
-			data, err := c.fetchRankedPlayerFightData(ranking)
+			data, err := c.fetchRankedPlayerFightData(ctx, ranking)
 			results <- cohortResult{
 				index: index,
 				data:  data,
@@ -801,7 +814,7 @@ func (c *WCLHTTPClient) fetchTopRankedCohortData(selectedFight types.NormalizedF
 	return ordered, nil
 }
 
-func (c *WCLHTTPClient) getEncounterRankings(encounterID int, difficultyName, className, specName string, limit int) ([]WCLRankingEntry, error) {
+func (c *WCLHTTPClient) getEncounterRankings(ctx context.Context, encounterID int, difficultyName, className, specName string, limit int) ([]WCLRankingEntry, error) {
 	const maxRankingPage = 20
 	if limit <= 0 {
 		limit = 10
@@ -810,15 +823,15 @@ func (c *WCLHTTPClient) getEncounterRankings(encounterID int, difficultyName, cl
 	filteredClass := rankingClassFilterValue(className)
 	filteredSpec := rankingSpecFilterValue(specName)
 
-	return c.collectEncounterRankings(encounterID, difficultyName, className, filteredClass, filteredSpec, maxRankingPage, limit)
+	return c.collectEncounterRankings(ctx, encounterID, difficultyName, className, filteredClass, filteredSpec, maxRankingPage, limit)
 }
 
-func (c *WCLHTTPClient) collectEncounterRankings(encounterID int, difficultyName, className, classFilter, specFilter string, maxRankingPage int, limit int) ([]WCLRankingEntry, error) {
+func (c *WCLHTTPClient) collectEncounterRankings(ctx context.Context, encounterID int, difficultyName, className, classFilter, specFilter string, maxRankingPage int, limit int) ([]WCLRankingEntry, error) {
 	page := 1
 	results := make([]WCLRankingEntry, 0, limit)
 
 	for len(results) < limit && page <= maxRankingPage {
-		rankingPage, err := c.fetchEncounterRankingsPage(encounterID, difficultyName, classFilter, specFilter, page)
+		rankingPage, err := c.fetchEncounterRankingsPage(ctx, encounterID, difficultyName, classFilter, specFilter, page)
 		if err != nil {
 			return nil, err
 		}
@@ -845,7 +858,7 @@ func (c *WCLHTTPClient) collectEncounterRankings(encounterID int, difficultyName
 	return results, nil
 }
 
-func (c *WCLHTTPClient) fetchEncounterRankingsPage(encounterID int, difficultyName, classFilter, specFilter string, page int) (*WCLCharacterRankingsResponse, error) {
+func (c *WCLHTTPClient) fetchEncounterRankingsPage(ctx context.Context, encounterID int, difficultyName, classFilter, specFilter string, page int) (*WCLCharacterRankingsResponse, error) {
 	variables := map[string]interface{}{}
 	varDecls := make([]string, 0, 2)
 	difficultyArg := ""
@@ -890,7 +903,7 @@ func (c *WCLHTTPClient) fetchEncounterRankingsPage(encounterID int, difficultyNa
 
 	var err error
 	for attempt := 1; attempt <= 3; attempt++ {
-		err = c.makeGraphQLRequest(query, variables, &response)
+		err = c.makeGraphQLRequest(ctx, query, variables, &response)
 		if err == nil {
 			break
 		}
@@ -906,8 +919,8 @@ func (c *WCLHTTPClient) fetchEncounterRankingsPage(encounterID int, difficultyNa
 	return &response.Data.WorldData.Encounter.CharacterRankings, nil
 }
 
-func (c *WCLHTTPClient) fetchRankedPlayerFightData(ranking WCLRankingEntry) (types.PlayerFightData, error) {
-	fights, err := c.GetFights(ranking.Report.Code)
+func (c *WCLHTTPClient) fetchRankedPlayerFightData(ctx context.Context, ranking WCLRankingEntry) (types.PlayerFightData, error) {
+	fights, err := c.GetFights(ctx, ranking.Report.Code)
 	if err != nil {
 		return types.PlayerFightData{}, err
 	}
@@ -924,7 +937,7 @@ func (c *WCLHTTPClient) fetchRankedPlayerFightData(ranking WCLRankingEntry) (typ
 		return types.PlayerFightData{}, fmt.Errorf("fight %d not found in report %s", ranking.Report.FightID, ranking.Report.Code)
 	}
 
-	characters, err := c.getFightCharacters(ranking.Report.Code, ranking.Report.FightID)
+	characters, err := c.getFightCharacters(ctx, ranking.Report.Code, ranking.Report.FightID)
 	if err != nil {
 		return types.PlayerFightData{}, err
 	}
@@ -934,7 +947,7 @@ func (c *WCLHTTPClient) fetchRankedPlayerFightData(ranking WCLRankingEntry) (typ
 		return types.PlayerFightData{}, fmt.Errorf("actor match not found for %s in report %s", ranking.Name, ranking.Report.Code)
 	}
 
-	data, err := c.fetchPlayerFightData(ranking.Report.Code, *fight, character.ID)
+	data, err := c.fetchPlayerFightData(ctx, ranking.Report.Code, *fight, character.ID)
 	if err != nil {
 		return types.PlayerFightData{}, err
 	}
@@ -944,7 +957,7 @@ func (c *WCLHTTPClient) fetchRankedPlayerFightData(ranking WCLRankingEntry) (typ
 	return data, nil
 }
 
-func (c *WCLHTTPClient) getPlayerActors(reportID string) ([]WCLActor, error) {
+func (c *WCLHTTPClient) getPlayerActors(ctx context.Context, reportID string) ([]WCLActor, error) {
 	query := `
 		query ($code: String!) {
 			reportData {
@@ -976,7 +989,7 @@ func (c *WCLHTTPClient) getPlayerActors(reportID string) ([]WCLActor, error) {
 		} `json:"data"`
 	}
 
-	if err := c.makeGraphQLRequest(query, map[string]interface{}{"code": reportID}, &response); err != nil {
+	if err := c.makeGraphQLRequest(ctx, query, map[string]interface{}{"code": reportID}, &response); err != nil {
 		return nil, fmt.Errorf("failed to fetch report actors: %w", err)
 	}
 
@@ -991,7 +1004,7 @@ func (c *WCLHTTPClient) getPlayerActors(reportID string) ([]WCLActor, error) {
 	return actors, nil
 }
 
-func (c *WCLHTTPClient) getReportAbilityNames(reportID string) (map[int]string, error) {
+func (c *WCLHTTPClient) getReportAbilityNames(ctx context.Context, reportID string) (map[int]string, error) {
 	query := `
 		query ($code: String!) {
 			reportData {
@@ -1018,7 +1031,7 @@ func (c *WCLHTTPClient) getReportAbilityNames(reportID string) (map[int]string, 
 		} `json:"data"`
 	}
 
-	if err := c.makeGraphQLRequest(query, map[string]interface{}{"code": reportID}, &response); err != nil {
+	if err := c.makeGraphQLRequest(ctx, query, map[string]interface{}{"code": reportID}, &response); err != nil {
 		return nil, fmt.Errorf("failed to fetch report abilities: %w", err)
 	}
 
@@ -1033,8 +1046,8 @@ func (c *WCLHTTPClient) getReportAbilityNames(reportID string) (map[int]string, 
 	return abilityNames, nil
 }
 
-func (c *WCLHTTPClient) getFightCharacters(reportID string, fightID int) ([]types.CharacterOption, error) {
-	actors, err := c.getPlayerActors(reportID)
+func (c *WCLHTTPClient) getFightCharacters(ctx context.Context, reportID string, fightID int) ([]types.CharacterOption, error) {
+	actors, err := c.getPlayerActors(ctx, reportID)
 	if err != nil {
 		return nil, err
 	}
@@ -1069,7 +1082,7 @@ func (c *WCLHTTPClient) getFightCharacters(reportID string, fightID int) ([]type
 		} `json:"data"`
 	}
 
-	if err := c.makeGraphQLRequest(query, map[string]interface{}{"code": reportID}, &response); err != nil {
+	if err := c.makeGraphQLRequest(ctx, query, map[string]interface{}{"code": reportID}, &response); err != nil {
 		return nil, fmt.Errorf("failed to fetch fight player details: %w", err)
 	}
 
@@ -1082,7 +1095,7 @@ func (c *WCLHTTPClient) getFightCharacters(reportID string, fightID int) ([]type
 		return nil, fmt.Errorf("failed to parse fight player details: %w", err)
 	}
 
-	c.addTalentBuilds(reportID, fightID, characters)
+	c.addTalentBuilds(ctx, reportID, fightID, characters)
 
 	sort.Slice(characters, func(i, j int) bool {
 		return characters[i].Name < characters[j].Name
@@ -1091,7 +1104,7 @@ func (c *WCLHTTPClient) getFightCharacters(reportID string, fightID int) ([]type
 	return characters, nil
 }
 
-func (c *WCLHTTPClient) addTalentBuilds(reportID string, fightID int, characters []types.CharacterOption) {
+func (c *WCLHTTPClient) addTalentBuilds(ctx context.Context, reportID string, fightID int, characters []types.CharacterOption) {
 	if len(characters) == 0 {
 		return
 	}
@@ -1137,7 +1150,7 @@ func (c *WCLHTTPClient) addTalentBuilds(reportID string, fightID int, characters
 		} `json:"data"`
 	}
 
-	if err := c.makeGraphQLRequest(query, map[string]interface{}{"code": reportID}, &response); err != nil {
+	if err := c.makeGraphQLRequest(ctx, query, map[string]interface{}{"code": reportID}, &response); err != nil {
 		return
 	}
 	if len(response.Data.ReportData.Report.Fights) == 0 {
@@ -1158,34 +1171,34 @@ func (c *WCLHTTPClient) addTalentBuilds(reportID string, fightID int, characters
 	}
 }
 
-func (c *WCLHTTPClient) fetchPlayerFightData(reportID string, fight types.NormalizedFight, actorID int) (types.PlayerFightData, error) {
-	reportMetadata, err := c.GetReportMetadata(reportID)
+func (c *WCLHTTPClient) fetchPlayerFightData(ctx context.Context, reportID string, fight types.NormalizedFight, actorID int) (types.PlayerFightData, error) {
+	reportMetadata, err := c.GetReportMetadata(ctx, reportID)
 	if err != nil {
 		return types.PlayerFightData{}, err
 	}
 
-	abilityNames, err := c.getReportAbilityNames(reportID)
+	abilityNames, err := c.getReportAbilityNames(ctx, reportID)
 	if err != nil {
 		return types.PlayerFightData{}, err
 	}
 
-	castRaw, err := c.fetchEvents(reportID, "Casts", fight.ID, actorID)
+	castRaw, err := c.fetchEvents(ctx, reportID, "Casts", fight.ID, actorID)
 	if err != nil {
 		return types.PlayerFightData{}, err
 	}
-	damageRaw, err := c.fetchEvents(reportID, "DamageDone", fight.ID, actorID)
+	damageRaw, err := c.fetchEvents(ctx, reportID, "DamageDone", fight.ID, actorID)
 	if err != nil {
 		return types.PlayerFightData{}, err
 	}
-	healRaw, err := c.fetchEvents(reportID, "Healing", fight.ID, actorID)
+	healRaw, err := c.fetchEvents(ctx, reportID, "Healing", fight.ID, actorID)
 	if err != nil {
 		return types.PlayerFightData{}, err
 	}
-	resourceRaw, err := c.fetchEvents(reportID, "Resources", fight.ID, actorID)
+	resourceRaw, err := c.fetchEvents(ctx, reportID, "Resources", fight.ID, actorID)
 	if err != nil {
 		return types.PlayerFightData{}, err
 	}
-	buffRaw, err := c.fetchBuffEvents(reportID, fight.ID, actorID)
+	buffRaw, err := c.fetchBuffEvents(ctx, reportID, fight.ID, actorID)
 	if err != nil {
 		return types.PlayerFightData{}, err
 	}
@@ -1206,11 +1219,15 @@ func (c *WCLHTTPClient) fetchPlayerFightData(reportID string, fight types.Normal
 	}, nil
 }
 
-func (c *WCLHTTPClient) fetchEvents(reportID, dataType string, fightID, sourceID int) ([]map[string]interface{}, error) {
+func (c *WCLHTTPClient) fetchEvents(ctx context.Context, reportID, dataType string, fightID, sourceID int) ([]map[string]interface{}, error) {
 	collected := make([]map[string]interface{}, 0)
 	var nextStart *int64
 
-	for {
+	for page := 0; ; page++ {
+		if page >= maxEventPages {
+			log.Printf("fetchEvents: %s events for report %s hit the %d-page cap; truncating", dataType, reportID, maxEventPages)
+			break
+		}
 		startClause := ""
 		if nextStart != nil {
 			startClause = fmt.Sprintf("\n\t\t\t\t\t\t\tstartTime: %d,", *nextStart)
@@ -1247,7 +1264,7 @@ func (c *WCLHTTPClient) fetchEvents(reportID, dataType string, fightID, sourceID
 			} `json:"data"`
 		}
 
-		if err := c.makeGraphQLRequest(query, map[string]interface{}{"code": reportID}, &response); err != nil {
+		if err := c.makeGraphQLRequest(ctx, query, map[string]interface{}{"code": reportID}, &response); err != nil {
 			return nil, fmt.Errorf("failed to fetch %s events: %w", dataType, err)
 		}
 
@@ -1265,11 +1282,15 @@ func (c *WCLHTTPClient) fetchEvents(reportID, dataType string, fightID, sourceID
 	return collected, nil
 }
 
-func (c *WCLHTTPClient) fetchBuffEvents(reportID string, fightID, actorID int) ([]map[string]interface{}, error) {
+func (c *WCLHTTPClient) fetchBuffEvents(ctx context.Context, reportID string, fightID, actorID int) ([]map[string]interface{}, error) {
 	collected := make([]map[string]interface{}, 0)
 	var nextStart *int64
 
-	for {
+	for page := 0; ; page++ {
+		if page >= maxEventPages {
+			log.Printf("fetchBuffEvents: buff events for report %s hit the %d-page cap; truncating", reportID, maxEventPages)
+			break
+		}
 		startClause := ""
 		if nextStart != nil {
 			startClause = fmt.Sprintf("\n\t\t\t\t\t\t\tstartTime: %d,", *nextStart)
@@ -1306,7 +1327,7 @@ func (c *WCLHTTPClient) fetchBuffEvents(reportID string, fightID, actorID int) (
 			} `json:"data"`
 		}
 
-		if err := c.makeGraphQLRequest(query, map[string]interface{}{"code": reportID}, &response); err != nil {
+		if err := c.makeGraphQLRequest(ctx, query, map[string]interface{}{"code": reportID}, &response); err != nil {
 			return nil, fmt.Errorf("failed to fetch buff events: %w", err)
 		}
 
@@ -1324,7 +1345,7 @@ func (c *WCLHTTPClient) fetchBuffEvents(reportID string, fightID, actorID int) (
 	return collected, nil
 }
 
-func (c *WCLHTTPClient) getCurrentUserCharacterReports(accessToken string, characterID, page, limit int) (*WCLUserCharacter, error) {
+func (c *WCLHTTPClient) getCurrentUserCharacterReports(ctx context.Context, accessToken string, characterID, page, limit int) (*WCLUserCharacter, error) {
 	query := fmt.Sprintf(`
 		query {
 			userData {
@@ -1389,7 +1410,7 @@ func (c *WCLHTTPClient) getCurrentUserCharacterReports(accessToken string, chara
 		} `json:"data"`
 	}
 
-	if err := c.makeUserGraphQLRequest(accessToken, query, nil, &response); err != nil {
+	if err := c.makeUserGraphQLRequest(ctx, accessToken, query, nil, &response); err != nil {
 		return nil, fmt.Errorf("failed to fetch character recent reports: %w", err)
 	}
 
