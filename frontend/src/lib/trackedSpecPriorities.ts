@@ -60,16 +60,16 @@ export const trackedSpecPriorities: Record<
         abilities: [
             "Invoke Niuzao, the Black Ox",
             "Exploding Keg",
+            "Celestial Infusion",
             "Touch of Death",
             "Fortifying Brew",
-            "Celestial Infusion",
         ],
         buffs: [
             "Invoke Niuzao, the Black Ox",
             "Exploding Keg",
+            "Celestial Infusion",
             "Touch of Death",
             "Fortifying Brew",
-            "Celestial Infusion",
         ],
     },
     "Protection Paladin": {
@@ -98,6 +98,7 @@ export const trackedSpecPriorities: Record<
             "Shield Wall",
             "Demoralizing Shout",
             "Spell Reflection",
+            "Rallying Cry",
         ],
         buffs: [
             "Avatar",
@@ -108,6 +109,7 @@ export const trackedSpecPriorities: Record<
             "Shield Wall",
             "Demoralizing Shout",
             "Spell Reflection",
+            "Rallying Cry",
         ],
     },
     "Frost Death Knight": {
@@ -307,12 +309,7 @@ export const trackedSpecPriorities: Record<
             "Primordial Storm",
             "Astral Shift",
         ],
-        buffs: [
-            "Sundering",
-            "Doom Winds",
-            "Primordial Storm",
-            "Astral Shift",
-        ],
+        buffs: ["Sundering", "Doom Winds", "Primordial Storm", "Astral Shift"],
     },
     "Arms Warrior": {
         abilities: [
@@ -323,9 +320,8 @@ export const trackedSpecPriorities: Record<
             "Sweeping Strikes",
             "Execute",
             "Rend",
-            "Die by the Sword",
             "Spell Reflection",
-            "Defensive Stance",
+            "Rallying Cry",
         ],
         buffs: [
             "Colossus Smash",
@@ -335,9 +331,8 @@ export const trackedSpecPriorities: Record<
             "Sweeping Strikes",
             "Execute",
             "Rend",
-            "Die by the Sword",
             "Spell Reflection",
-            "Defensive Stance",
+            "Rallying Cry",
         ],
     },
     "Fury Warrior": {
@@ -349,7 +344,7 @@ export const trackedSpecPriorities: Record<
             "Rend",
             "Enraged Regeneration",
             "Spell Reflection",
-            "Defensive Stance",
+            "Rallying Cry",
         ],
         buffs: [
             "Recklessness",
@@ -359,7 +354,7 @@ export const trackedSpecPriorities: Record<
             "Rend",
             "Enraged Regeneration",
             "Spell Reflection",
-            "Defensive Stance",
+            "Rallying Cry",
         ],
     },
     "Devourer Demon Hunter": {
@@ -470,15 +465,15 @@ export const trackedSpecPriorities: Record<
         abilities: [
             "Arcane Surge",
             "Touch of the Magi",
-            "Mirror Image",
             "Alter Time",
+            "Mirror Image",
             "Ice Cold",
         ],
         buffs: [
             "Arcane Surge",
             "Touch of the Magi",
-            "Mirror Image",
             "Alter Time",
+            "Mirror Image",
             "Ice Cold",
         ],
     },
@@ -490,8 +485,8 @@ export const trackedSpecPriorities: Record<
             "Flamestrike",
             "Meteor",
             "Scorch",
-            "Mirror Image",
             "Alter Time",
+            "Mirror Image",
             "Ice Cold",
         ],
         buffs: [
@@ -501,8 +496,8 @@ export const trackedSpecPriorities: Record<
             "Flamestrike",
             "Meteor",
             "Scorch",
-            "Mirror Image",
             "Alter Time",
+            "Mirror Image",
             "Ice Cold",
         ],
     },
@@ -510,15 +505,15 @@ export const trackedSpecPriorities: Record<
         abilities: [
             "Ray of Frost",
             "Frozen Orb",
-            "Mirror Image",
             "Alter Time",
+            "Mirror Image",
             "Ice Cold",
         ],
         buffs: [
             "Ray of Frost",
             "Frozen Orb",
-            "Mirror Image",
             "Alter Time",
+            "Mirror Image",
             "Ice Cold",
         ],
     },
@@ -591,11 +586,6 @@ export const trackedSpecPriorities: Record<
             "Unending Resolve",
             "Dark Pact",
         ],
-        buffs: [
-            "Summon Infernal",
-            "Havoc",
-            "Unending Resolve",
-            "Dark Pact",
-        ],
+        buffs: ["Summon Infernal", "Havoc", "Unending Resolve", "Dark Pact"],
     },
 };
