@@ -10,35 +10,11 @@ import type {
   ResourceTimelineResponse,
 } from '../types'
 
-export interface AnalyzeResponse {
-  reportId: string
-  preferredFightId?: number
-  fights: Fight[]
-  characters: Character[]
-}
-
 export interface FightCharacterFilter {
   name: string
   serverName?: string
   serverSlug?: string
   className?: string
-}
-
-export async function analyzeReport(url: string): Promise<AnalyzeResponse> {
-  const response = await fetch('/api/analyze/intake', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ url }),
-  })
-
-  if (!response.ok) {
-    const errorText = await response.text()
-    throw new Error(errorText || 'Failed to analyze report')
-  }
-
-  return response.json()
 }
 
 export async function getFights(
